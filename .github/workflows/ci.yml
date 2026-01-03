@@ -1,47 +1,39 @@
 name: ci
 
-# Supply Chain Security:
-# - All actions pinned to full SHA for immutable references
-# - Safe Chain runs before dependency installation
-# - Lifecycle scripts disabled during install
-# - Minimal permissions following principle of least privilege
-
 permissions:
   contents: read
-  packages: read
-  actions: read
 
 on:
   push:
+  pull_request:
   workflow_dispatch:
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  ci:
-    runs-on: ubuntu-latest
+  build:
+    runs-on: macos-latest
     steps:
       - name: Check out the code
-        # actions/checkout v4.3.1
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          submodules: true
+          components: rustfmt, clippy
 
-      - name: Setup Bun
-        # oven-sh/setup-bun v2.0.2
-        uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
 
-      # Supply Chain Security: Setup safe-chain before dependency installation
-      - name: Setup safe-chain
-        run: |
-          bun add -g @aikidosec/safe-chain
-          safe-chain setup-ci
+      - name: Check format
+        run: cargo fmt --check
 
-      # Supply Chain Security: Disable lifecycle scripts during install
-      - name: Install packages via packages.json
-        env:
-          npm_config_ignore_scripts: "true"
-          CI: "true"
-        run: make install_ci
+      - name: Clippy
+        run: cargo clippy -- -D warnings
 
-      - name: lint test format
-        run: |
-          make before-commit
+      - name: Build
+        run: cargo build --verbose
+
+      - name: Run tests
+        run: cargo test --verbose
