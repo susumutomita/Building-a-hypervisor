@@ -1,6 +1,9 @@
 //! macOS Hypervisor.framework を使ったハイパーバイザーの共通ライブラリ
 
-use applevisor::{Mappable, Mapping, MemPerms, Reg, Vcpu, VirtualMachine};
+pub mod mmio;
+
+use applevisor::{Mappable, Mapping, MemPerms, Reg, SysReg, Vcpu, VirtualMachine};
+use mmio::MmioManager;
 
 /// ハイパーバイザーの実行結果
 pub struct HypervisorResult {
@@ -20,6 +23,7 @@ pub struct Hypervisor {
     vcpu: Vcpu,
     mem: Mapping,
     guest_addr: u64,
+    mmio_manager: MmioManager,
 }
 
 impl Hypervisor {
@@ -40,6 +44,7 @@ impl Hypervisor {
             vcpu,
             mem,
             guest_addr,
+            mmio_manager: MmioManager::new(),
         })
     }
 
@@ -108,6 +113,14 @@ impl Hypervisor {
         Ok(self.vcpu.get_reg(reg)?)
     }
 
+    /// MMIO デバイスハンドラを登録する
+    ///
+    /// # Arguments
+    /// * `handler` - 登録する MMIO ハンドラ
+    pub fn register_mmio_handler(&mut self, handler: Box<dyn crate::mmio::MmioHandler>) {
+        self.mmio_manager.register(handler);
+    }
+
     /// ゲストプログラムを実行する
     ///
     /// # Arguments
@@ -117,7 +130,7 @@ impl Hypervisor {
     /// # Returns
     /// 実行結果 (HypervisorResult)
     pub fn run(
-        &self,
+        &mut self,
         initial_cpsr: Option<u64>,
         trap_debug: Option<bool>,
     ) -> Result<HypervisorResult, Box<dyn std::error::Error>> {
@@ -175,23 +188,46 @@ impl Hypervisor {
 
             let pc = self.vcpu.get_reg(Reg::PC)?;
 
-            // BRK 命令による例外の場合は終了
+            // 例外処理
             if let applevisor::ExitReason::EXCEPTION = exit_info.reason {
                 let syndrome = exit_info.exception.syndrome;
                 let ec = (syndrome >> 26) & 0x3f;
 
-                // EC=0x3C: BRK instruction (AArch64)
-                if ec == 0x3C {
-                    return Ok(HypervisorResult {
-                        pc,
-                        registers,
-                        exit_reason: exit_info.reason,
-                        exception_syndrome: Some(syndrome),
-                    });
+                match ec {
+                    0x24 => {
+                        // Data Abort from lower EL
+                        if !self.handle_data_abort(syndrome)? {
+                            return Ok(HypervisorResult {
+                                pc,
+                                registers,
+                                exit_reason: exit_info.reason,
+                                exception_syndrome: Some(syndrome),
+                            });
+                        }
+                    }
+                    0x3c => {
+                        // BRK instruction (AArch64)
+                        return Ok(HypervisorResult {
+                            pc,
+                            registers,
+                            exit_reason: exit_info.reason,
+                            exception_syndrome: Some(syndrome),
+                        });
+                    }
+                    _ => {
+                        // その他の例外は VM Exit
+                        eprintln!(
+                            "Unknown exception: EC=0x{:x}, syndrome=0x{:x}",
+                            ec, syndrome
+                        );
+                        return Ok(HypervisorResult {
+                            pc,
+                            registers,
+                            exit_reason: exit_info.reason,
+                            exception_syndrome: Some(syndrome),
+                        });
+                    }
                 }
-
-                // 他の例外の場合は PC を進めて続行
-                self.vcpu.set_reg(Reg::PC, pc + 4)?;
             } else {
                 // 予期しない VM Exit
                 return Ok(HypervisorResult {
@@ -202,5 +238,63 @@ impl Hypervisor {
                 });
             }
         }
+    }
+
+    /// Data Abort 例外を処理する
+    ///
+    /// # Arguments
+    /// * `syndrome` - ESR_EL2 の値
+    ///
+    /// # Returns
+    /// 続行する場合は true、VM Exit する場合は false
+    fn handle_data_abort(&mut self, syndrome: u64) -> Result<bool, Box<dyn std::error::Error>> {
+        // WnR ビット: 0 = read, 1 = write
+        let is_write = (syndrome & (1 << 6)) != 0;
+
+        // SAS (Syndrome Access Size) ビット [23:22]
+        // 0b00 = byte, 0b01 = halfword, 0b10 = word, 0b11 = doubleword
+        let sas = (syndrome >> 22) & 0x3;
+        let size = 1 << sas; // 1, 2, 4, 8 bytes
+
+        // FAR_EL1 から fault address を取得
+        // Note: macOS Hypervisor.framework では FAR_EL1 が 0 になることが多い。
+        // これは、例外が EL2 にトラップされた際に FAR_EL1 が設定されないためと思われる。
+        // その場合は命令をデコードして base register から取得する必要がある。
+        let far_el1 = self.vcpu.get_sys_reg(SysReg::FAR_EL1)?;
+
+        // Workaround: FAR_EL1 が 0 の場合、X1 から取得
+        // TODO: 命令を完全にデコードして実際の base register を特定する
+        let fault_addr = if far_el1 == 0 {
+            // とりあえず X1 をフォールバックとして使用
+            // これは str w0, [x1] のような単純な命令では機能するが、
+            // より複雑なアドレッシングモードでは不正確になる可能性がある
+            self.vcpu.get_reg(Reg::X1)?
+        } else {
+            far_el1
+        };
+
+        eprintln!(
+            "Data Abort: addr=0x{:x}, is_write={}, size={}, syndrome=0x{:x}",
+            fault_addr, is_write, size, syndrome
+        );
+
+        // MMIO ハンドリング
+        if is_write {
+            // 書き込み: X0 から値を取得して MMIO デバイスに書き込む
+            // TODO: ISS の SRT フィールドから実際のレジスタを取得
+            let value = self.vcpu.get_reg(Reg::X0)?;
+            self.mmio_manager.handle_write(fault_addr, value, size)?;
+        } else {
+            // 読み取り: MMIO デバイスから値を読み取って X0 に設定
+            // TODO: ISS の SRT フィールドから実際のレジスタを取得
+            let value = self.mmio_manager.handle_read(fault_addr, size)?;
+            self.vcpu.set_reg(Reg::X0, value)?;
+        }
+
+        // PC を進める
+        let pc = self.vcpu.get_reg(Reg::PC)?;
+        self.vcpu.set_reg(Reg::PC, pc + 4)?;
+
+        Ok(true) // 続行
     }
 }
