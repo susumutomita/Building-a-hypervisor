@@ -22,10 +22,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("      brk #0");
 
     let instructions = [
-        0xd2800840,  // mov x0, #0x42
-        0xd2a12001,  // mov x1, #0x09000000 (movz x1, #0x900, lsl #16) - FIXED: X1 not X0
-        0xb9000020,  // str w0, [x1]  // MMIO アドレス 0x09000000 への書き込み
-        0xd4200000,  // brk #0
+        0xd2800840, // mov x0, #0x42
+        0xd2a12001, // mov x1, #0x09000000 (movz x1, #0x900, lsl #16) - FIXED: X1 not X0
+        0xb9000020, // str w0, [x1]  // MMIO アドレス 0x09000000 への書き込み
+        0xd4200000, // brk #0
     ];
 
     hv.write_instructions(&instructions)?;

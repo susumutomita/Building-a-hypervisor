@@ -216,7 +216,10 @@ impl Hypervisor {
                     }
                     _ => {
                         // その他の例外は VM Exit
-                        eprintln!("Unknown exception: EC=0x{:x}, syndrome=0x{:x}", ec, syndrome);
+                        eprintln!(
+                            "Unknown exception: EC=0x{:x}, syndrome=0x{:x}",
+                            ec, syndrome
+                        );
                         return Ok(HypervisorResult {
                             pc,
                             registers,
