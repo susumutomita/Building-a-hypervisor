@@ -48,8 +48,13 @@ impl Hypervisor {
     /// # Arguments
     /// * `offset` - guest_addr からのオフセット (bytes)
     /// * `instruction` - ARM64 機械語命令 (32-bit)
-    pub fn write_instruction(&mut self, offset: u64, instruction: u32) -> Result<(), Box<dyn std::error::Error>> {
-        self.mem.write_dword(self.guest_addr + offset, instruction)?;
+    pub fn write_instruction(
+        &mut self,
+        offset: u64,
+        instruction: u32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.mem
+            .write_dword(self.guest_addr + offset, instruction)?;
         Ok(())
     }
 
@@ -57,7 +62,10 @@ impl Hypervisor {
     ///
     /// # Arguments
     /// * `instructions` - ARM64 機械語命令の配列
-    pub fn write_instructions(&mut self, instructions: &[u32]) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn write_instructions(
+        &mut self,
+        instructions: &[u32],
+    ) -> Result<(), Box<dyn std::error::Error>> {
         for (i, &instruction) in instructions.iter().enumerate() {
             self.write_instruction((i * 4) as u64, instruction)?;
         }
@@ -108,7 +116,11 @@ impl Hypervisor {
     ///
     /// # Returns
     /// 実行結果 (HypervisorResult)
-    pub fn run(&self, initial_cpsr: Option<u64>, trap_debug: Option<bool>) -> Result<HypervisorResult, Box<dyn std::error::Error>> {
+    pub fn run(
+        &self,
+        initial_cpsr: Option<u64>,
+        trap_debug: Option<bool>,
+    ) -> Result<HypervisorResult, Box<dyn std::error::Error>> {
         // PC を設定
         self.vcpu.set_reg(Reg::PC, self.guest_addr)?;
 

@@ -51,7 +51,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("VM Exit:");
     println!("  - Reason: {:?}", result.exit_reason);
     println!("  - PC: 0x{:x}", result.pc);
-    println!("  - X0: {} (0x{:x})", result.registers[0], result.registers[0]);
+    println!(
+        "  - X0: {} (0x{:x})",
+        result.registers[0], result.registers[0]
+    );
 
     if let Some(syndrome) = result.exception_syndrome {
         let ec = (syndrome >> 26) & 0x3f;
@@ -60,7 +63,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!("\n✓ BRK 命令を検出!");
-    println!("  ゲストが x0 = {} を設定して BRK を呼び出しました。", result.registers[0]);
+    println!(
+        "  ゲストが x0 = {} を設定して BRK を呼び出しました。",
+        result.registers[0]
+    );
 
     println!("\n=== ハイパーバイザーデモ完了 ===");
     println!("\nヒント: より実用的な例は以下のコマンドで実行できます:");
