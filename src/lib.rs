@@ -97,6 +97,42 @@ impl Hypervisor {
         Ok(self.mem.read_qword(self.guest_addr + offset)?)
     }
 
+    /// ゲストメモリにバイトデータを書き込む
+    ///
+    /// # Arguments
+    /// * `addr` - 書き込むアドレス（絶対アドレス）
+    /// * `byte` - 書き込むバイト
+    ///
+    /// # Note
+    /// `Mapping` は 4-byte 単位の read/write のみサポートするため、
+    /// 4-byte 単位で読み書きして部分更新を行う
+    pub fn write_byte(&mut self, addr: u64, byte: u8) -> Result<(), Box<dyn std::error::Error>> {
+        let aligned_addr = addr & !0x3;
+        let offset = (addr & 0x3) as usize;
+        let mut word = self.mem.read_dword(aligned_addr)?;
+        let mut bytes = word.to_le_bytes();
+        bytes[offset] = byte;
+        word = u32::from_le_bytes(bytes);
+        self.mem.write_dword(aligned_addr, word)?;
+        Ok(())
+    }
+
+    /// ゲストメモリからバイトデータを読み取る
+    ///
+    /// # Arguments
+    /// * `addr` - 読み取るアドレス（絶対アドレス）
+    ///
+    /// # Note
+    /// `Mapping` は 4-byte 単位の read/write のみサポートするため、
+    /// 4-byte 単位で読み書きして部分更新を行う
+    pub fn read_byte(&self, addr: u64) -> Result<u8, Box<dyn std::error::Error>> {
+        let aligned_addr = addr & !0x3;
+        let offset = (addr & 0x3) as usize;
+        let word = self.mem.read_dword(aligned_addr)?;
+        let bytes = word.to_le_bytes();
+        Ok(bytes[offset])
+    }
+
     /// vCPU のレジスタを設定する
     ///
     /// # Arguments
@@ -298,5 +334,72 @@ impl Hypervisor {
         self.vcpu.set_reg(Reg::PC, pc + 4)?;
 
         Ok(true) // 続行
+    }
+
+    /// Linux カーネルをブートする
+    ///
+    /// # Arguments
+    /// * `kernel` - カーネルイメージ
+    /// * `cmdline` - カーネルコマンドライン
+    /// * `dtb_addr` - Device Tree を配置するアドレス（省略時: 0x44000000）
+    ///
+    /// # Returns
+    /// 実行結果 (HypervisorResult)
+    ///
+    /// # Example
+    /// ```no_run
+    /// use hypervisor::{Hypervisor, boot::kernel::KernelImage};
+    ///
+    /// let mut hv = Hypervisor::new(0x40000000, 128 * 1024 * 1024).unwrap();
+    /// let kernel = KernelImage::from_bytes(vec![0x00, 0x00, 0x00, 0x14], None);
+    /// hv.boot_linux(&kernel, "console=ttyAMA0", None).unwrap();
+    /// ```
+    pub fn boot_linux(
+        &mut self,
+        kernel: &crate::boot::kernel::KernelImage,
+        cmdline: &str,
+        dtb_addr: Option<u64>,
+    ) -> Result<HypervisorResult, Box<dyn std::error::Error>> {
+        // 1. Device Tree 生成
+        let dtb = crate::boot::device_tree::generate_device_tree(
+            &crate::boot::device_tree::DeviceTreeConfig {
+                memory_base: self.guest_addr,
+                memory_size: self.mem.get_size() as u64,
+                uart_base: 0x0900_0000,
+                cmdline: cmdline.to_string(),
+            },
+        )?;
+
+        // 2. Device Tree をメモリに配置
+        let dtb_addr = dtb_addr.unwrap_or(0x4400_0000);
+        for (i, &byte) in dtb.iter().enumerate() {
+            self.write_byte(dtb_addr + i as u64, byte)?;
+        }
+
+        // 3. カーネルをメモリに配置
+        let kernel_addr = kernel.entry_point();
+        for (i, &byte) in kernel.data().iter().enumerate() {
+            self.write_byte(kernel_addr + i as u64, byte)?;
+        }
+
+        // 4. ARM64 Linux ブート条件を設定
+        // 参考: https://docs.kernel.org/arch/arm64/booting.html
+        self.set_reg(Reg::X0, dtb_addr)?; // Device Tree アドレス
+        self.set_reg(Reg::X1, 0)?; // Reserved
+        self.set_reg(Reg::X2, 0)?; // Reserved
+        self.set_reg(Reg::X3, 0)?; // Reserved
+        self.set_reg(Reg::PC, kernel_addr)?; // エントリーポイント
+
+        // CPSR: EL1h, MMU off, 割り込みマスク（DAIF）
+        // 0x3c5 = 0b001111000101
+        //   M[4:0] = 0b00101 = EL1h
+        //   DAIF = 0b1111 = すべての割り込みをマスク
+        self.set_reg(Reg::CPSR, 0x3c5)?;
+
+        // デバッグ例外のトラップを有効化
+        self.vcpu.set_trap_debug_exceptions(true)?;
+
+        // 5. VM Exit ループ
+        self.run(Some(0x3c5), Some(true))
     }
 }
