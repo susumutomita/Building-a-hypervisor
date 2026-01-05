@@ -9,9 +9,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("[1] デフォルト設定で Device Tree を生成中...");
     let default_config = DeviceTreeConfig::default();
     println!("    設定:");
-    println!("      - メモリベースアドレス: 0x{:x}", default_config.memory_base);
-    println!("      - メモリサイズ: 0x{:x} ({} MB)", default_config.memory_size, default_config.memory_size / (1024 * 1024));
-    println!("      - UART ベースアドレス: 0x{:x}", default_config.uart_base);
+    println!(
+        "      - メモリベースアドレス: 0x{:x}",
+        default_config.memory_base
+    );
+    println!(
+        "      - メモリサイズ: 0x{:x} ({} MB)",
+        default_config.memory_size,
+        default_config.memory_size / (1024 * 1024)
+    );
+    println!(
+        "      - UART ベースアドレス: 0x{:x}",
+        default_config.uart_base
+    );
     println!("      - Kernel cmdline: {}", default_config.cmdline);
 
     let dtb = generate_device_tree(&default_config)?;
@@ -34,7 +44,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if total_size as usize == dtb.len() {
         println!("    ✓ サイズが一致");
     } else {
-        println!("    ⚠ サイズ不一致: header={}, actual={}", total_size, dtb.len());
+        println!(
+            "    ⚠ サイズ不一致: header={}, actual={}",
+            total_size,
+            dtb.len()
+        );
     }
 
     // カスタム設定で Device Tree を生成
@@ -46,9 +60,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         cmdline: "console=ttyAMA0 earlycon debug".to_string(),
     };
     println!("    設定:");
-    println!("      - メモリベースアドレス: 0x{:x}", custom_config.memory_base);
-    println!("      - メモリサイズ: 0x{:x} ({} MB)", custom_config.memory_size, custom_config.memory_size / (1024 * 1024));
-    println!("      - UART ベースアドレス: 0x{:x}", custom_config.uart_base);
+    println!(
+        "      - メモリベースアドレス: 0x{:x}",
+        custom_config.memory_base
+    );
+    println!(
+        "      - メモリサイズ: 0x{:x} ({} MB)",
+        custom_config.memory_size,
+        custom_config.memory_size / (1024 * 1024)
+    );
+    println!(
+        "      - UART ベースアドレス: 0x{:x}",
+        custom_config.uart_base
+    );
     println!("      - Kernel cmdline: {}", custom_config.cmdline);
 
     let dtb2 = generate_device_tree(&custom_config)?;
