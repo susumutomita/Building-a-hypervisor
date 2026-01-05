@@ -1,5 +1,7 @@
 //! macOS Hypervisor.framework を使ったハイパーバイザーの共通ライブラリ
 
+pub mod boot;
+pub mod devices;
 pub mod mmio;
 
 use applevisor::{Mappable, Mapping, MemPerms, Reg, SysReg, Vcpu, VirtualMachine};

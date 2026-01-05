@@ -206,6 +206,87 @@ nr build
 
 すべて Green にならない限りタスクは完了とみなさない。失敗したら Plan.md に問題を記録する。
 
+### 4. ブログ記事作成と公開 (Documentation & Publishing)
+
+**重要**: 実装完了後は必ずブログ記事を作成して公開する。
+
+#### 4.1. ブログ記事作成
+
+1. `/Users/susumu/susumutomita.github.io/src/content/blog/` にマークダウンファイルを作成
+2. frontmatter に以下を設定:
+   ```yaml
+   ---
+   title: "記事タイトル"
+   description: "記事の説明"
+   pubDate: YYYY-MM-DD
+   category: "system"
+   ---
+   ```
+
+3. 記事の構成:
+   - はじめに（背景と目的）
+   - 実装したもの（概要）
+   - 実装詳細（コードと解説）
+   - 技術的な発見・ハマったポイント
+   - テスト結果
+   - 実行方法
+   - 次のステップ
+   - まとめ
+   - 参考資料
+
+4. ドキュメント作成ルールを厳守:
+   - 文末は「。」で終える（コロンや記号で終わらせない）
+   - 日本語と半角英数字の間に半角スペース
+   - 技術用語は原語を保つ（例: MMIO, UART, ARM64）
+   - 箇条書きの導入文も「。」で終わる
+
+#### 4.2. textlint チェック
+
+```bash
+cd /Users/susumu/susumutomita.github.io
+npx textlint --fix src/content/blog/記事ファイル名.md
+```
+
+エラーが残る場合は手動で修正する。
+
+#### 4.3. Git ワークフロー
+
+```bash
+# ブログリポジトリでブランチを作成
+git -C /Users/susumu/susumutomita.github.io checkout -b feat/add-記事名-blog-post
+
+# ファイルを追加してコミット
+git -C /Users/susumu/susumutomita.github.io add src/content/blog/記事ファイル名.md
+git -C /Users/susumu/susumutomita.github.io commit --no-gpg-sign -m "feat: 記事タイトル
+
+内容:
+- 主要トピック 1
+- 主要トピック 2
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
+
+# ブランチを push
+git -C /Users/susumu/susumutomita.github.io push -u origin feat/add-記事名-blog-post
+
+# PR を作成
+cd /Users/susumu/susumutomita.github.io
+gh pr create --title "feat: 記事タイトル" --body "記事の概要と内容"
+```
+
+#### 4.4. Plan.md への記録
+
+実装完了時の振り返りに、ブログ記事の作成も記録する:
+
+```markdown
+**ドキュメント化**:
+- ✅ ブログ記事作成: `記事ファイル名.md`
+  - 主要トピック 1
+  - 主要トピック 2
+  - PR: https://github.com/susumutomita/susumutomita.github.io/pull/番号
+```
+
 ---
 
 ## Git ワークフロー

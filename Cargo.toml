@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 applevisor = "0.1"
+vm-fdt = "0.3"
