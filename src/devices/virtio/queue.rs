@@ -23,7 +23,7 @@ const VIRTQ_DESC_F_INDIRECT: u16 = 4;
 /// VirtQueue Descriptor (16 bytes)
 ///
 /// バッファの記述子。複数の記述子を next でチェーンできる。
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Descriptor {
     /// ゲスト物理アドレス
     pub addr: u64,
@@ -62,23 +62,13 @@ impl Descriptor {
     }
 }
 
-impl Default for Descriptor {
-    fn default() -> Self {
-        Self {
-            addr: 0,
-            len: 0,
-            flags: 0,
-            next: 0,
-        }
-    }
-}
-
 /// Available Ring
 ///
 /// ドライバー（ゲスト）が利用可能にした記述子のインデックスを保持。
 #[derive(Debug)]
 struct AvailRing {
-    /// フラグ
+    /// フラグ（将来の実装で使用予定）
+    #[allow(dead_code)]
     flags: u16,
     /// 次に書き込むインデックス
     idx: u16,
@@ -95,13 +85,15 @@ impl AvailRing {
         }
     }
 
-    /// 次の利用可能な記述子インデックスを取得
+    /// 次の利用可能な記述子インデックスを取得（将来の実装で使用予定）
+    #[allow(dead_code)]
     fn pop(&mut self) -> Option<u16> {
         // TODO: 実際の実装では last_avail_idx と比較
         None
     }
 
-    /// 記述子インデックスを追加
+    /// 記述子インデックスを追加（将来の実装で使用予定）
+    #[allow(dead_code)]
     fn push(&mut self, desc_idx: u16) {
         let idx = self.idx as usize % self.ring.len();
         self.ring[idx] = desc_idx;
@@ -114,9 +106,11 @@ impl AvailRing {
 /// 処理完了した記述子チェーンの情報。
 #[derive(Debug, Clone, Copy)]
 struct UsedElem {
-    /// 記述子チェーンの開始インデックス
+    /// 記述子チェーンの開始インデックス（将来の実装で使用予定）
+    #[allow(dead_code)]
     id: u32,
-    /// 書き込まれた合計バイト数
+    /// 書き込まれた合計バイト数（将来の実装で使用予定）
+    #[allow(dead_code)]
     len: u32,
 }
 
@@ -131,7 +125,8 @@ impl UsedElem {
 /// デバイス（ホスト）が処理完了した記述子の情報を保持。
 #[derive(Debug)]
 struct UsedRing {
-    /// フラグ
+    /// フラグ（将来の実装で使用予定）
+    #[allow(dead_code)]
     flags: u16,
     /// 次に書き込むインデックス
     idx: u16,
