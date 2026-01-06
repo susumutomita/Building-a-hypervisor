@@ -45,7 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("[3] ゲストプログラムを実行中...\n");
     println!("---");
 
-    let result = hv.run(None, None)?;
+    let result = hv.run(None, None, None)?;
 
     // 結果を表示
     println!("VM Exit:");
