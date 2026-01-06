@@ -38,7 +38,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("      - is_write=true, size=4 が表示される");
     println!("\n---");
 
-    let result = hv.run(None, None)?;
+    let result = hv.run(None, None, None)?;
 
     // 結果を表示
     println!("\nVM Exit:");

@@ -6,6 +6,7 @@ pub mod mmio;
 
 use applevisor::{Mappable, Mapping, MemPerms, Reg, SysReg, Vcpu, VirtualMachine};
 use mmio::MmioManager;
+use std::mem::ManuallyDrop;
 
 /// ハイパーバイザーの実行結果
 pub struct HypervisorResult {
@@ -21,8 +22,8 @@ pub struct HypervisorResult {
 
 /// ゲストプログラムを実行するハイパーバイザー
 pub struct Hypervisor {
-    _vm: VirtualMachine,
-    vcpu: Vcpu,
+    _vm: ManuallyDrop<VirtualMachine>,
+    vcpu: ManuallyDrop<Vcpu>,
     mem: Mapping,
     guest_addr: u64,
     mmio_manager: MmioManager,
@@ -35,8 +36,8 @@ impl Hypervisor {
     /// * `guest_addr` - ゲストコードを配置するアドレス
     /// * `mem_size` - ゲストメモリのサイズ (bytes)
     pub fn new(guest_addr: u64, mem_size: usize) -> Result<Self, Box<dyn std::error::Error>> {
-        let _vm = VirtualMachine::new()?;
-        let vcpu = Vcpu::new()?;
+        let _vm = ManuallyDrop::new(VirtualMachine::new()?);
+        let vcpu = ManuallyDrop::new(Vcpu::new()?);
 
         let mut mem = Mapping::new(mem_size)?;
         mem.map(guest_addr, MemPerms::RWX)?;
@@ -164,6 +165,7 @@ impl Hypervisor {
     /// # Arguments
     /// * `initial_cpsr` - 初期 CPSR 値 (デフォルト: 0x3c4 = EL1h)
     /// * `trap_debug` - デバッグ例外をトラップするか (デフォルト: true)
+    /// * `initial_pc` - 初期 PC 値 (デフォルト: self.guest_addr)
     ///
     /// # Returns
     /// 実行結果 (HypervisorResult)
@@ -171,9 +173,11 @@ impl Hypervisor {
         &mut self,
         initial_cpsr: Option<u64>,
         trap_debug: Option<bool>,
+        initial_pc: Option<u64>,
     ) -> Result<HypervisorResult, Box<dyn std::error::Error>> {
         // PC を設定
-        self.vcpu.set_reg(Reg::PC, self.guest_addr)?;
+        let pc = initial_pc.unwrap_or(self.guest_addr);
+        self.vcpu.set_reg(Reg::PC, pc)?;
 
         // CPSR を設定 (デフォルト: EL1h mode)
         let cpsr = initial_cpsr.unwrap_or(0x3c4);
@@ -254,10 +258,11 @@ impl Hypervisor {
                     }
                     _ => {
                         // その他の例外は VM Exit
-                        eprintln!(
-                            "Unknown exception: EC=0x{:x}, syndrome=0x{:x}",
-                            ec, syndrome
-                        );
+                        // デバッグ用: 予期しない例外をログ出力
+                        // eprintln!(
+                        //     "Unknown exception: EC=0x{:x}, syndrome=0x{:x}",
+                        //     ec, syndrome
+                        // );
                         return Ok(HypervisorResult {
                             pc,
                             registers,
@@ -311,10 +316,11 @@ impl Hypervisor {
             far_el1
         };
 
-        eprintln!(
-            "Data Abort: addr=0x{:x}, is_write={}, size={}, syndrome=0x{:x}",
-            fault_addr, is_write, size, syndrome
-        );
+        // デバッグ用: Data Abort の詳細をログ出力
+        // eprintln!(
+        //     "Data Abort: addr=0x{:x}, is_write={}, size={}, syndrome=0x{:x}",
+        //     fault_addr, is_write, size, syndrome
+        // );
 
         // MMIO ハンドリング
         if is_write {
@@ -388,18 +394,32 @@ impl Hypervisor {
         self.set_reg(Reg::X1, 0)?; // Reserved
         self.set_reg(Reg::X2, 0)?; // Reserved
         self.set_reg(Reg::X3, 0)?; // Reserved
-        self.set_reg(Reg::PC, kernel_addr)?; // エントリーポイント
 
         // CPSR: EL1h, MMU off, 割り込みマスク（DAIF）
         // 0x3c5 = 0b001111000101
         //   M[4:0] = 0b00101 = EL1h
         //   DAIF = 0b1111 = すべての割り込みをマスク
-        self.set_reg(Reg::CPSR, 0x3c5)?;
 
         // デバッグ例外のトラップを有効化
         self.vcpu.set_trap_debug_exceptions(true)?;
 
-        // 5. VM Exit ループ
-        self.run(Some(0x3c5), Some(true))
+        // 5. VM Exit ループ (PC をカーネルエントリーポイントに設定)
+        self.run(Some(0x3c5), Some(true), Some(kernel_addr))
+    }
+}
+
+impl Drop for Hypervisor {
+    fn drop(&mut self) {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        // Vcpu を先に破棄（panic をキャッチして無視）
+        let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+            ManuallyDrop::drop(&mut self.vcpu);
+        }));
+
+        // VirtualMachine を破棄（panic をキャッチして無視）
+        let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+            ManuallyDrop::drop(&mut self._vm);
+        }));
     }
 }
