@@ -57,6 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         memory_base: 0x8000_0000,
         memory_size: 0x1000_0000, // 256MB
         uart_base: 0x1000_0000,
+        virtio_base: 0x1100_0000,
         cmdline: "console=ttyAMA0 earlycon debug".to_string(),
     };
     println!("    設定:");

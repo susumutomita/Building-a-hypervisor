@@ -151,8 +151,7 @@ impl VirtioBlockDevice {
     ///
     /// * `sector` - 開始セクタ番号
     /// * `data` - 読み取ったデータを格納するバッファ
-    #[allow(dead_code)]
-    fn read_sectors(&mut self, sector: u64, data: &mut [u8]) -> Result<(), Box<dyn Error>> {
+    pub fn read_sectors(&mut self, sector: u64, data: &mut [u8]) -> Result<(), Box<dyn Error>> {
         let disk = self.disk_image.as_mut().ok_or("No disk image attached")?;
 
         let offset = sector * SECTOR_SIZE as u64;
@@ -168,8 +167,7 @@ impl VirtioBlockDevice {
     ///
     /// * `sector` - 開始セクタ番号
     /// * `data` - 書き込むデータ
-    #[allow(dead_code)]
-    fn write_sectors(&mut self, sector: u64, data: &[u8]) -> Result<(), Box<dyn Error>> {
+    pub fn write_sectors(&mut self, sector: u64, data: &[u8]) -> Result<(), Box<dyn Error>> {
         let disk = self.disk_image.as_mut().ok_or("No disk image attached")?;
 
         let offset = sector * SECTOR_SIZE as u64;

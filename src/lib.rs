@@ -372,6 +372,7 @@ impl Hypervisor {
                 memory_base: self.guest_addr,
                 memory_size: self.mem.get_size() as u64,
                 uart_base: 0x0900_0000,
+                virtio_base: 0x0a00_0000,
                 cmdline: cmdline.to_string(),
             },
         )?;
