@@ -12,6 +12,8 @@ pub struct DeviceTreeConfig {
     pub memory_size: u64,
     /// UART base address (typically 0x09000000)
     pub uart_base: u64,
+    /// VirtIO Block device base address (typically 0x0a000000)
+    pub virtio_base: u64,
     /// Kernel command line
     pub cmdline: String,
 }
@@ -22,7 +24,8 @@ impl Default for DeviceTreeConfig {
             memory_base: 0x4000_0000,
             memory_size: 0x800_0000, // 128MB
             uart_base: 0x0900_0000,
-            cmdline: "console=ttyAMA0".to_string(),
+            virtio_base: 0x0a00_0000,
+            cmdline: "console=ttyAMA0 root=/dev/vda rw".to_string(),
         }
     }
 }
@@ -33,6 +36,7 @@ impl Default for DeviceTreeConfig {
 /// - CPU node (single ARM64 CPU)
 /// - Memory node
 /// - UART (PL011) node
+/// - VirtIO Block device node
 /// - chosen node with bootargs
 ///
 /// # Arguments
@@ -82,6 +86,14 @@ pub fn generate_device_tree(config: &DeviceTreeConfig) -> Result<Vec<u8>, Box<dy
     fdt.property_null("clock-names")?;
     fdt.end_node(uart_node)?; // pl011
 
+    // VirtIO Block device node
+    let virtio_node_name = format!("virtio_block@{:x}", config.virtio_base);
+    let virtio_node = fdt.begin_node(&virtio_node_name)?;
+    fdt.property_string("compatible", "virtio,mmio")?;
+    fdt.property_array_u64("reg", &[config.virtio_base, 0x200])?;
+    fdt.property_u32("interrupts", 0)?;
+    fdt.end_node(virtio_node)?; // virtio_block
+
     // chosen node (boot parameters)
     let chosen_node = fdt.begin_node("chosen")?;
     fdt.property_string("bootargs", &config.cmdline)?;
@@ -116,7 +128,8 @@ mod tests {
             memory_base: 0x8000_0000,
             memory_size: 0x1000_0000, // 256MB
             uart_base: 0x1000_0000,
-            cmdline: "console=ttyAMA0 earlycon".to_string(),
+            virtio_base: 0x1100_0000,
+            cmdline: "console=ttyAMA0 earlycon root=/dev/vda rw".to_string(),
         };
 
         let dtb = generate_device_tree(&config).unwrap();
@@ -132,6 +145,7 @@ mod tests {
         assert_eq!(config.memory_base, 0x4000_0000);
         assert_eq!(config.memory_size, 0x800_0000);
         assert_eq!(config.uart_base, 0x0900_0000);
-        assert_eq!(config.cmdline, "console=ttyAMA0");
+        assert_eq!(config.virtio_base, 0x0a00_0000);
+        assert_eq!(config.cmdline, "console=ttyAMA0 root=/dev/vda rw");
     }
 }
