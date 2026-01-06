@@ -6,6 +6,7 @@ pub mod mmio;
 
 use applevisor::{Mappable, Mapping, MemPerms, Reg, SysReg, Vcpu, VirtualMachine};
 use mmio::MmioManager;
+use std::mem::ManuallyDrop;
 
 /// ハイパーバイザーの実行結果
 pub struct HypervisorResult {
@@ -21,8 +22,8 @@ pub struct HypervisorResult {
 
 /// ゲストプログラムを実行するハイパーバイザー
 pub struct Hypervisor {
-    _vm: VirtualMachine,
-    vcpu: Vcpu,
+    _vm: ManuallyDrop<VirtualMachine>,
+    vcpu: ManuallyDrop<Vcpu>,
     mem: Mapping,
     guest_addr: u64,
     mmio_manager: MmioManager,
@@ -35,8 +36,8 @@ impl Hypervisor {
     /// * `guest_addr` - ゲストコードを配置するアドレス
     /// * `mem_size` - ゲストメモリのサイズ (bytes)
     pub fn new(guest_addr: u64, mem_size: usize) -> Result<Self, Box<dyn std::error::Error>> {
-        let _vm = VirtualMachine::new()?;
-        let vcpu = Vcpu::new()?;
+        let _vm = ManuallyDrop::new(VirtualMachine::new()?);
+        let vcpu = ManuallyDrop::new(Vcpu::new()?);
 
         let mut mem = Mapping::new(mem_size)?;
         mem.map(guest_addr, MemPerms::RWX)?;
@@ -404,5 +405,21 @@ impl Hypervisor {
 
         // 5. VM Exit ループ (PC をカーネルエントリーポイントに設定)
         self.run(Some(0x3c5), Some(true), Some(kernel_addr))
+    }
+}
+
+impl Drop for Hypervisor {
+    fn drop(&mut self) {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        // Vcpu を先に破棄（panic をキャッチして無視）
+        let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+            ManuallyDrop::drop(&mut self.vcpu);
+        }));
+
+        // VirtualMachine を破棄（panic をキャッチして無視）
+        let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+            ManuallyDrop::drop(&mut self._vm);
+        }));
     }
 }
