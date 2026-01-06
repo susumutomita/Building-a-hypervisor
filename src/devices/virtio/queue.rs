@@ -184,7 +184,10 @@ impl VirtQueue {
     ///
     /// `num` が 2 の累乗でない場合、または 0 の場合にパニックする。
     pub fn new(num: u16) -> Self {
-        assert!(num > 0 && num.is_power_of_two(), "Queue size must be a power of 2");
+        assert!(
+            num > 0 && num.is_power_of_two(),
+            "Queue size must be a power of 2"
+        );
 
         Self {
             num,
