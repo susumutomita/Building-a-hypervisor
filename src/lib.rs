@@ -164,6 +164,7 @@ impl Hypervisor {
     /// # Arguments
     /// * `initial_cpsr` - 初期 CPSR 値 (デフォルト: 0x3c4 = EL1h)
     /// * `trap_debug` - デバッグ例外をトラップするか (デフォルト: true)
+    /// * `initial_pc` - 初期 PC 値 (デフォルト: self.guest_addr)
     ///
     /// # Returns
     /// 実行結果 (HypervisorResult)
@@ -171,9 +172,11 @@ impl Hypervisor {
         &mut self,
         initial_cpsr: Option<u64>,
         trap_debug: Option<bool>,
+        initial_pc: Option<u64>,
     ) -> Result<HypervisorResult, Box<dyn std::error::Error>> {
         // PC を設定
-        self.vcpu.set_reg(Reg::PC, self.guest_addr)?;
+        let pc = initial_pc.unwrap_or(self.guest_addr);
+        self.vcpu.set_reg(Reg::PC, pc)?;
 
         // CPSR を設定 (デフォルト: EL1h mode)
         let cpsr = initial_cpsr.unwrap_or(0x3c4);
@@ -388,18 +391,16 @@ impl Hypervisor {
         self.set_reg(Reg::X1, 0)?; // Reserved
         self.set_reg(Reg::X2, 0)?; // Reserved
         self.set_reg(Reg::X3, 0)?; // Reserved
-        self.set_reg(Reg::PC, kernel_addr)?; // エントリーポイント
 
         // CPSR: EL1h, MMU off, 割り込みマスク（DAIF）
         // 0x3c5 = 0b001111000101
         //   M[4:0] = 0b00101 = EL1h
         //   DAIF = 0b1111 = すべての割り込みをマスク
-        self.set_reg(Reg::CPSR, 0x3c5)?;
 
         // デバッグ例外のトラップを有効化
         self.vcpu.set_trap_debug_exceptions(true)?;
 
-        // 5. VM Exit ループ
-        self.run(Some(0x3c5), Some(true))
+        // 5. VM Exit ループ (PC をカーネルエントリーポイントに設定)
+        self.run(Some(0x3c5), Some(true), Some(kernel_addr))
     }
 }

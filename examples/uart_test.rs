@@ -48,7 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ゲストプログラムを実行
     println!("\n[4] ゲストプログラムを実行中...\n---");
     println!("UART 出力: ");
-    let result = hv.run(None, None)?;
+    let result = hv.run(None, None, None)?;
     println!("---");
 
     // 結果を表示
