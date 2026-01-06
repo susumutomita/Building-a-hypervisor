@@ -2,8 +2,8 @@
 //!
 //! VirtIO 1.2 仕様に基づいた Block デバイスのエミュレーション。
 
-use crate::mmio::MmioHandler;
 use crate::devices::virtio::VirtQueue;
+use crate::mmio::MmioHandler;
 use std::error::Error;
 
 /// VirtIO MMIO マジック値 ("virt")
