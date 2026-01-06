@@ -257,10 +257,11 @@ impl Hypervisor {
                     }
                     _ => {
                         // その他の例外は VM Exit
-                        eprintln!(
-                            "Unknown exception: EC=0x{:x}, syndrome=0x{:x}",
-                            ec, syndrome
-                        );
+                        // デバッグ用: 予期しない例外をログ出力
+                        // eprintln!(
+                        //     "Unknown exception: EC=0x{:x}, syndrome=0x{:x}",
+                        //     ec, syndrome
+                        // );
                         return Ok(HypervisorResult {
                             pc,
                             registers,
@@ -314,10 +315,11 @@ impl Hypervisor {
             far_el1
         };
 
-        eprintln!(
-            "Data Abort: addr=0x{:x}, is_write={}, size={}, syndrome=0x{:x}",
-            fault_addr, is_write, size, syndrome
-        );
+        // デバッグ用: Data Abort の詳細をログ出力
+        // eprintln!(
+        //     "Data Abort: addr=0x{:x}, is_write={}, size={}, syndrome=0x{:x}",
+        //     fault_addr, is_write, size, syndrome
+        // );
 
         // MMIO ハンドリング
         if is_write {

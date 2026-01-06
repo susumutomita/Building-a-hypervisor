@@ -1,0 +1,3 @@
+[target.aarch64-apple-darwin]
+# カスタムランナー: ビルド後に自動でコード署名
+runner = ["sh", "-c", "codesign -s - --entitlements entitlements.plist --force $0 2>/dev/null || true; exec $0 \"$@\""]
