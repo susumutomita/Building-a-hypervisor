@@ -19,6 +19,7 @@ const MAX_IRQS: usize = 256;
 const SPI_START: usize = 32;
 
 // GICD レジスタオフセット
+#[allow(dead_code)]
 mod gicd_regs {
     pub const CTLR: u64 = 0x000; // Distributor Control Register
     pub const TYPER: u64 = 0x004; // Interrupt Controller Type Register
@@ -64,6 +65,8 @@ pub struct GicDistributor {
     /// 各割り込みのターゲット CPU マスク
     irq_targets: [u8; MAX_IRQS],
     /// 各割り込みの設定 (エッジ/レベルトリガー)
+    /// 将来の拡張用に保持
+    #[allow(dead_code)]
     irq_config: [u32; MAX_IRQS / 16],
 }
 
@@ -352,7 +355,7 @@ impl Gic {
                 let base_idx = (o - gicd_regs::ITARGETSR) as usize;
                 for i in 0..4 {
                     let irq_idx = base_idx + i;
-                    if irq_idx >= SPI_START && irq_idx < MAX_IRQS {
+                    if (SPI_START..MAX_IRQS).contains(&irq_idx) {
                         self.distributor.irq_targets[irq_idx] = ((value >> (i * 8)) & 0xFF) as u8;
                     }
                 }
@@ -360,7 +363,7 @@ impl Gic {
             gicd_regs::SGIR => {
                 // Software Generated Interrupt
                 let target_list = ((value >> 16) & 0xFF) as u8;
-                let sgi_id = (value & 0xF) as u32;
+                let sgi_id = value & 0xF;
                 if target_list != 0 {
                     self.set_irq_pending(sgi_id);
                 }
