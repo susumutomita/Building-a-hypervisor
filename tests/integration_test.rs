@@ -24,6 +24,8 @@ fn test_device_tree_with_kernel() {
         memory_size: 128 * 1024 * 1024, // 128MB
         uart_base: 0x0900_0000,
         virtio_base: 0x0a00_0000,
+        gic_dist_base: 0x0800_0000,
+        gic_cpu_base: 0x0801_0000,
         cmdline: "console=ttyAMA0 earlycon".to_string(),
     };
 
@@ -51,6 +53,8 @@ fn test_kernel_image_and_device_tree_integration() {
         memory_size: 128 * 1024 * 1024,
         uart_base: 0x0900_0000,
         virtio_base: 0x0a00_0000,
+        gic_dist_base: 0x0800_0000,
+        gic_cpu_base: 0x0801_0000,
         cmdline: "console=ttyAMA0".to_string(),
     };
     let dtb = generate_device_tree(&config).unwrap();
