@@ -49,7 +49,9 @@ fn main() {
     let fire_after = freq / 20; // 50ms
     let cval = phys_cnt + fire_after;
 
-    ic.timer.write_sysreg(TimerReg::CNTP_CVAL_EL0, cval).unwrap();
+    ic.timer
+        .write_sysreg(TimerReg::CNTP_CVAL_EL0, cval)
+        .unwrap();
     ic.timer.write_sysreg(TimerReg::CNTP_CTL_EL0, 1).unwrap(); // 有効化
 
     println!("   CNTP_CVAL_EL0 <- {}", cval);
@@ -93,10 +95,7 @@ fn main() {
 
         // 次の acknowledge はスプリアス (1023)
         let next_irq = ic.acknowledge();
-        println!(
-            "   次の acknowledge() -> {} (1023 = スプリアス)",
-            next_irq
-        );
+        println!("   次の acknowledge() -> {} (1023 = スプリアス)", next_irq);
     }
 
     // 最終状態
