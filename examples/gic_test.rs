@@ -23,8 +23,16 @@ fn main() {
     // MMIO 経由で状態を読み取り
     let gicd_ctlr = gic.read(0x000, 4).unwrap();
     let gicc_ctlr = gic.read(GIC_DIST_SIZE, 4).unwrap();
-    println!("   GICD_CTLR: 0x{:X} (Distributor {})", gicd_ctlr, if gicd_ctlr != 0 { "有効" } else { "無効" });
-    println!("   GICC_CTLR: 0x{:X} (CPU Interface {})", gicc_ctlr, if gicc_ctlr != 0 { "有効" } else { "無効" });
+    println!(
+        "   GICD_CTLR: 0x{:X} (Distributor {})",
+        gicd_ctlr,
+        if gicd_ctlr != 0 { "有効" } else { "無効" }
+    );
+    println!(
+        "   GICC_CTLR: 0x{:X} (CPU Interface {})",
+        gicc_ctlr,
+        if gicc_ctlr != 0 { "有効" } else { "無効" }
+    );
 
     // GIC を有効化
     println!("\n2. GIC を有効化");
@@ -33,8 +41,16 @@ fn main() {
 
     let gicd_ctlr = gic.read(0x000, 4).unwrap();
     let gicc_ctlr = gic.read(GIC_DIST_SIZE, 4).unwrap();
-    println!("   GICD_CTLR: 0x{:X} (Distributor {})", gicd_ctlr, if gicd_ctlr != 0 { "有効" } else { "無効" });
-    println!("   GICC_CTLR: 0x{:X} (CPU Interface {})", gicc_ctlr, if gicc_ctlr != 0 { "有効" } else { "無効" });
+    println!(
+        "   GICD_CTLR: 0x{:X} (Distributor {})",
+        gicd_ctlr,
+        if gicd_ctlr != 0 { "有効" } else { "無効" }
+    );
+    println!(
+        "   GICC_CTLR: 0x{:X} (CPU Interface {})",
+        gicc_ctlr,
+        if gicc_ctlr != 0 { "有効" } else { "無効" }
+    );
 
     // TYPER レジスタを読み取り
     let typer = gic.read(0x004, 4).unwrap();
