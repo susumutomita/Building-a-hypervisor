@@ -14,6 +14,10 @@ pub struct DeviceTreeConfig {
     pub uart_base: u64,
     /// VirtIO Block device base address (typically 0x0a000000)
     pub virtio_base: u64,
+    /// GIC Distributor base address (typically 0x08000000)
+    pub gic_dist_base: u64,
+    /// GIC CPU Interface base address (typically 0x08010000)
+    pub gic_cpu_base: u64,
     /// Kernel command line
     pub cmdline: String,
 }
@@ -25,6 +29,8 @@ impl Default for DeviceTreeConfig {
             memory_size: 0x800_0000, // 128MB
             uart_base: 0x0900_0000,
             virtio_base: 0x0a00_0000,
+            gic_dist_base: 0x0800_0000,
+            gic_cpu_base: 0x0801_0000,
             cmdline: "console=ttyAMA0 root=/dev/vda rw".to_string(),
         }
     }
@@ -35,6 +41,8 @@ impl Default for DeviceTreeConfig {
 /// Creates a minimal Device Tree with:
 /// - CPU node (single ARM64 CPU)
 /// - Memory node
+/// - GICv2 interrupt controller node
+/// - Timer node (ARM Generic Timer)
 /// - UART (PL011) node
 /// - VirtIO Block device node
 /// - chosen node with bootargs
@@ -53,6 +61,8 @@ pub fn generate_device_tree(config: &DeviceTreeConfig) -> Result<Vec<u8>, Box<dy
     fdt.property_u32("#address-cells", 2)?;
     fdt.property_u32("#size-cells", 2)?;
     fdt.property_string("model", "hypervisor-virt")?;
+    // Interrupt cells for GICv2
+    fdt.property_u32("interrupt-parent", 1)?; // phandle of GIC
 
     // CPUs node
     let cpus_node = fdt.begin_node("cpus")?;
@@ -78,11 +88,51 @@ pub fn generate_device_tree(config: &DeviceTreeConfig) -> Result<Vec<u8>, Box<dy
     fdt.property_array_u64("reg", &[config.memory_base, config.memory_size])?;
     fdt.end_node(memory_node)?; // memory
 
+    // GICv2 interrupt controller node
+    let gic_node_name = format!("intc@{:x}", config.gic_dist_base);
+    let gic_node = fdt.begin_node(&gic_node_name)?;
+    fdt.property_string("compatible", "arm,cortex-a15-gic")?;
+    fdt.property_null("interrupt-controller")?;
+    fdt.property_u32("#interrupt-cells", 3)?; // GIC requires 3 cells
+                                              // reg = <GICD_base GICD_size GICC_base GICC_size>
+    fdt.property_array_u64(
+        "reg",
+        &[
+            config.gic_dist_base,
+            0x1_0000, // GICD size
+            config.gic_cpu_base,
+            0x1_0000, // GICC size
+        ],
+    )?;
+    fdt.property_u32("phandle", 1)?; // phandle for interrupt-parent reference
+    fdt.end_node(gic_node)?; // intc
+
+    // Timer node (ARM Generic Timer)
+    // PPI IRQs: Secure Phys=13, Non-secure Phys=14, Virt=11, Hyp=10
+    let timer_node = fdt.begin_node("timer")?;
+    fdt.property_string("compatible", "arm,armv8-timer")?;
+    // interrupts: <type irq flags> for each timer
+    // type: 1=PPI, irq: actual IRQ number (PPI base is 16, so subtract 16)
+    // flags: 0x304 = edge-triggered, active-low (common for timer)
+    fdt.property_array_u32(
+        "interrupts",
+        &[
+            1, 13, 0x304, // Secure Physical Timer (IRQ 29)
+            1, 14, 0x304, // Non-secure Physical Timer (IRQ 30)
+            1, 11, 0x304, // Virtual Timer (IRQ 27)
+            1, 10, 0x304, // Hypervisor Timer (IRQ 26)
+        ],
+    )?;
+    fdt.property_null("always-on")?;
+    fdt.end_node(timer_node)?; // timer
+
     // UART node (PL011)
     let uart_node_name = format!("pl011@{:x}", config.uart_base);
     let uart_node = fdt.begin_node(&uart_node_name)?;
     fdt.property_string("compatible", "arm,pl011")?;
     fdt.property_array_u64("reg", &[config.uart_base, 0x1000])?;
+    // UART uses SPI IRQ 1 (IRQ 33)
+    fdt.property_array_u32("interrupts", &[0, 1, 0x4])?; // SPI, IRQ 1, level-high
     fdt.property_null("clock-names")?;
     fdt.end_node(uart_node)?; // pl011
 
@@ -91,7 +141,8 @@ pub fn generate_device_tree(config: &DeviceTreeConfig) -> Result<Vec<u8>, Box<dy
     let virtio_node = fdt.begin_node(&virtio_node_name)?;
     fdt.property_string("compatible", "virtio,mmio")?;
     fdt.property_array_u64("reg", &[config.virtio_base, 0x200])?;
-    fdt.property_u32("interrupts", 0)?;
+    // VirtIO uses SPI IRQ 2 (IRQ 34)
+    fdt.property_array_u32("interrupts", &[0, 2, 0x1])?; // SPI, IRQ 2, edge-rising
     fdt.end_node(virtio_node)?; // virtio_block
 
     // chosen node (boot parameters)
@@ -129,6 +180,8 @@ mod tests {
             memory_size: 0x1000_0000, // 256MB
             uart_base: 0x1000_0000,
             virtio_base: 0x1100_0000,
+            gic_dist_base: 0x0800_0000,
+            gic_cpu_base: 0x0801_0000,
             cmdline: "console=ttyAMA0 earlycon root=/dev/vda rw".to_string(),
         };
 
@@ -146,6 +199,8 @@ mod tests {
         assert_eq!(config.memory_size, 0x800_0000);
         assert_eq!(config.uart_base, 0x0900_0000);
         assert_eq!(config.virtio_base, 0x0a00_0000);
+        assert_eq!(config.gic_dist_base, 0x0800_0000);
+        assert_eq!(config.gic_cpu_base, 0x0801_0000);
         assert_eq!(config.cmdline, "console=ttyAMA0 root=/dev/vda rw");
     }
 }
