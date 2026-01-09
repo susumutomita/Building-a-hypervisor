@@ -6,6 +6,10 @@
 
 use crate::mmio::MmioHandler;
 use std::error::Error;
+use std::sync::{Arc, Mutex};
+
+/// 共有 GIC タイプ
+pub type SharedGic = Arc<Mutex<Gic>>;
 
 /// GICv2 のデフォルトベースアドレス
 pub const GIC_DIST_BASE: u64 = 0x0800_0000;
@@ -441,6 +445,58 @@ impl MmioHandler for Gic {
         }
         Ok(())
     }
+}
+
+/// 共有 GIC を MMIO ハンドラとして使うためのラッパー
+///
+/// `Arc<Mutex<Gic>>` を使って GIC を共有しながら、MMIO ハンドラとして登録できます。
+#[derive(Debug)]
+pub struct SharedGicWrapper {
+    gic: SharedGic,
+    base_addr: u64,
+}
+
+impl SharedGicWrapper {
+    /// 新しい共有 GIC ラッパーを作成
+    pub fn new(gic: SharedGic, base_addr: u64) -> Self {
+        Self { gic, base_addr }
+    }
+
+    /// 共有 GIC への参照を取得
+    pub fn gic(&self) -> &SharedGic {
+        &self.gic
+    }
+}
+
+impl MmioHandler for SharedGicWrapper {
+    fn base(&self) -> u64 {
+        self.base_addr
+    }
+
+    fn size(&self) -> u64 {
+        GIC_DIST_SIZE + GIC_CPU_SIZE
+    }
+
+    fn read(&mut self, offset: u64, size: usize) -> Result<u64, Box<dyn Error>> {
+        let mut gic = self
+            .gic
+            .lock()
+            .map_err(|e| format!("GIC lock error: {}", e))?;
+        gic.read(offset, size)
+    }
+
+    fn write(&mut self, offset: u64, value: u64, size: usize) -> Result<(), Box<dyn Error>> {
+        let mut gic = self
+            .gic
+            .lock()
+            .map_err(|e| format!("GIC lock error: {}", e))?;
+        gic.write(offset, value, size)
+    }
+}
+
+/// 共有 GIC を作成するヘルパー関数
+pub fn create_shared_gic(base_addr: u64) -> SharedGic {
+    Arc::new(Mutex::new(Gic::with_base(base_addr)))
 }
 
 #[cfg(test)]

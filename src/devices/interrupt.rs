@@ -2,7 +2,7 @@
 //!
 //! GIC と Timer を統合して、タイマー割り込みを自動的に GIC に配信します。
 
-use super::gic::{Gic, GIC_DIST_SIZE};
+use super::gic::{create_shared_gic, SharedGic, GIC_DIST_BASE, GIC_DIST_SIZE};
 use super::timer::{Timer, PHYS_TIMER_IRQ, VIRT_TIMER_IRQ};
 use crate::mmio::MmioHandler;
 
@@ -19,8 +19,8 @@ const GICC_CTLR: u64 = 0x000;
 /// GIC と Timer を統合管理し、タイマー割り込みを自動的に GIC にルーティングします。
 #[derive(Debug)]
 pub struct InterruptController {
-    /// GIC (Generic Interrupt Controller)
-    pub gic: Gic,
+    /// 共有 GIC (Generic Interrupt Controller)
+    pub gic: SharedGic,
     /// ARM Generic Timer
     pub timer: Timer,
 }
@@ -32,10 +32,15 @@ impl Default for InterruptController {
 }
 
 impl InterruptController {
-    /// 新しい割り込みコントローラーを作成
+    /// 新しい割り込みコントローラーを作成（内部 GIC を使用）
     pub fn new() -> Self {
+        Self::with_gic(create_shared_gic(GIC_DIST_BASE))
+    }
+
+    /// 既存の共有 GIC を使って割り込みコントローラーを作成
+    pub fn with_gic(gic: SharedGic) -> Self {
         Self {
-            gic: Gic::new(),
+            gic,
             timer: Timer::new(),
         }
     }
@@ -45,52 +50,56 @@ impl InterruptController {
     /// タイマーがペンディング状態の場合、対応する IRQ を GIC にセットします。
     /// VM のメインループで定期的に呼び出す必要があります。
     pub fn poll_timer_irqs(&mut self) {
+        let mut gic = self.gic.lock().unwrap();
+
         // 物理タイマー
         if self.timer.phys_timer_pending() {
-            self.gic.set_irq_pending(PHYS_TIMER_IRQ);
+            gic.set_irq_pending(PHYS_TIMER_IRQ);
         }
 
         // 仮想タイマー
         if self.timer.virt_timer_pending() {
-            self.gic.set_irq_pending(VIRT_TIMER_IRQ);
+            gic.set_irq_pending(VIRT_TIMER_IRQ);
         }
     }
 
     /// ペンディング中の IRQ があるかチェック
     pub fn has_pending_irq(&self) -> bool {
-        self.gic.get_highest_pending_irq().is_some()
+        let gic = self.gic.lock().unwrap();
+        gic.get_highest_pending_irq().is_some()
     }
 
     /// 最高優先度のペンディング IRQ を取得
     pub fn get_pending_irq(&self) -> Option<u32> {
-        self.gic.get_highest_pending_irq()
+        let gic = self.gic.lock().unwrap();
+        gic.get_highest_pending_irq()
     }
 
     /// GIC を有効化
     pub fn enable(&mut self) {
+        let mut gic = self.gic.lock().unwrap();
         // GICD_CTLR = 1
-        self.gic.write(GICD_CTLR, 1, 4).unwrap();
+        gic.write(GICD_CTLR, 1, 4).unwrap();
         // GICC_CTLR = 1
-        self.gic.write(GIC_DIST_SIZE + GICC_CTLR, 1, 4).unwrap();
+        gic.write(GIC_DIST_SIZE + GICC_CTLR, 1, 4).unwrap();
     }
 
     /// タイマー IRQ を有効化
     pub fn enable_timer_irqs(&mut self) {
+        let mut gic = self.gic.lock().unwrap();
         // PPI は IRQ 16-31 で、ISENABLER[0] のビット 16-31 に対応
         // 物理タイマー IRQ 30 を有効化
         // 仮想タイマー IRQ 27 を有効化
         let mask = (1u32 << PHYS_TIMER_IRQ) | (1u32 << VIRT_TIMER_IRQ);
-        self.gic.write(GICD_ISENABLER, mask as u64, 4).unwrap();
+        gic.write(GICD_ISENABLER, mask as u64, 4).unwrap();
 
         // 優先度を設定 (中程度: 0x80)
         // IPRIORITYR はバイト単位でアクセス
         // IRQ 27 の優先度
-        self.gic
-            .write(GICD_IPRIORITYR + VIRT_TIMER_IRQ as u64, 0x80, 4)
+        gic.write(GICD_IPRIORITYR + VIRT_TIMER_IRQ as u64, 0x80, 4)
             .unwrap();
         // IRQ 30 の優先度
-        self.gic
-            .write(GICD_IPRIORITYR + PHYS_TIMER_IRQ as u64, 0x80, 4)
+        gic.write(GICD_IPRIORITYR + PHYS_TIMER_IRQ as u64, 0x80, 4)
             .unwrap();
     }
 
@@ -101,18 +110,21 @@ impl InterruptController {
 
     /// 割り込みを acknowledge して IRQ 番号を返す
     pub fn acknowledge(&mut self) -> u32 {
-        self.gic.acknowledge_irq()
+        let mut gic = self.gic.lock().unwrap();
+        gic.acknowledge_irq()
     }
 
     /// 割り込み処理完了を通知
     pub fn end_of_interrupt(&mut self, irq: u32) {
-        self.gic.end_of_interrupt(irq);
+        let mut gic = self.gic.lock().unwrap();
+        gic.end_of_interrupt(irq);
     }
 
     /// GIC が有効かどうか
     pub fn is_enabled(&mut self) -> bool {
-        let gicd = self.gic.read(GICD_CTLR, 4).unwrap();
-        let gicc = self.gic.read(GIC_DIST_SIZE + GICC_CTLR, 4).unwrap();
+        let mut gic = self.gic.lock().unwrap();
+        let gicd = gic.read(GICD_CTLR, 4).unwrap();
+        let gicc = gic.read(GIC_DIST_SIZE + GICC_CTLR, 4).unwrap();
         gicd != 0 && gicc != 0
     }
 }
@@ -140,8 +152,9 @@ mod tests {
         let mut ic = InterruptController::new();
         ic.enable_timer_irqs();
 
-        // ISENABLER[0] を読み取って確認
-        let enabled = ic.gic.read(GICD_ISENABLER, 4).unwrap() as u32;
+        // ISENABLER[0] を読み取って確認（MMIO インターフェース経由）
+        let mut gic = ic.gic.lock().unwrap();
+        let enabled = gic.read(GICD_ISENABLER, 4).unwrap() as u32;
         // 物理タイマー IRQ 30 が有効
         assert_ne!(enabled & (1 << 30), 0);
         // 仮想タイマー IRQ 27 が有効
