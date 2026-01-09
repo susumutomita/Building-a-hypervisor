@@ -411,7 +411,9 @@ impl Hypervisor {
                 } else {
                     0 // XZR
                 };
-                self.interrupt_controller.timer.write_sysreg(timer_reg, value)?;
+                self.interrupt_controller
+                    .timer
+                    .write_sysreg(timer_reg, value)?;
             }
 
             // PC を進める

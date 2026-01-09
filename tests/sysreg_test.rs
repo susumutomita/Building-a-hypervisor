@@ -51,7 +51,7 @@ fn mrs_cntfrq_el0_はタイマー周波数を読み取れる() {
     // BRK #0
     let instructions = vec![
         encode_mrs(0, 3, 3, 14, 0, 0), // mrs x0, cntfrq_el0
-        encode_brk(0),                  // brk #0
+        encode_brk(0),                 // brk #0
     ];
     hv.write_instructions(&instructions)
         .expect("Failed to write instructions");
@@ -79,7 +79,7 @@ fn mrs_cntpct_el0_は物理カウンタを読み取れる() {
     // BRK #0
     let instructions = vec![
         encode_mrs(0, 3, 3, 14, 0, 1), // mrs x0, cntpct_el0
-        encode_brk(0),                  // brk #0
+        encode_brk(0),                 // brk #0
     ];
     hv.write_instructions(&instructions)
         .expect("Failed to write instructions");
@@ -112,7 +112,7 @@ fn mrs_cntvct_el0_は仮想カウンタを読み取れる() {
     // BRK #0
     let instructions = vec![
         encode_mrs(0, 3, 3, 14, 0, 2), // mrs x0, cntvct_el0
-        encode_brk(0),                  // brk #0
+        encode_brk(0),                 // brk #0
     ];
     hv.write_instructions(&instructions)
         .expect("Failed to write instructions");
@@ -132,10 +132,10 @@ fn msr_cntp_cval_el0_で物理タイマー比較値を書き込める() {
     // MRS x1, CNTP_CVAL_EL0  ; 書き込んだ値を読み返す
     // BRK #0
     let instructions = vec![
-        0xd2824680, // mov x0, #0x1234
+        0xd2824680,                    // mov x0, #0x1234
         encode_msr(0, 3, 3, 14, 2, 2), // msr cntp_cval_el0, x0
         encode_mrs(1, 3, 3, 14, 2, 2), // mrs x1, cntp_cval_el0
-        encode_brk(0),                  // brk #0
+        encode_brk(0),                 // brk #0
     ];
     hv.write_instructions(&instructions)
         .expect("Failed to write instructions");
@@ -158,7 +158,10 @@ fn msr_cntp_cval_el0_で物理タイマー比較値を書き込める() {
         assert_eq!(result.registers[1], 0x1234);
     } else {
         // ハードウェアに直接アクセスしている可能性
-        eprintln!("Warning: Physical timer register not trapped (x1={})", result.registers[1]);
+        eprintln!(
+            "Warning: Physical timer register not trapped (x1={})",
+            result.registers[1]
+        );
     }
 }
 
@@ -171,10 +174,10 @@ fn msr_cntp_ctl_el0_で物理タイマーを有効化できる() {
     // MRS x1, CNTP_CTL_EL0 ; 書き込んだ値を読み返す
     // BRK #0
     let instructions = vec![
-        0xd2800020, // mov x0, #1
+        0xd2800020,                    // mov x0, #1
         encode_msr(0, 3, 3, 14, 2, 1), // msr cntp_ctl_el0, x0
         encode_mrs(1, 3, 3, 14, 2, 1), // mrs x1, cntp_ctl_el0
-        encode_brk(0),                  // brk #0
+        encode_brk(0),                 // brk #0
     ];
     hv.write_instructions(&instructions)
         .expect("Failed to write instructions");
@@ -192,7 +195,10 @@ fn msr_cntp_ctl_el0_で物理タイマーを有効化できる() {
     if result.registers[1] & 0x1 == 1 {
         assert_eq!(result.registers[1] & 0x1, 1);
     } else {
-        eprintln!("Warning: Physical timer CTL not trapped (x1={})", result.registers[1]);
+        eprintln!(
+            "Warning: Physical timer CTL not trapped (x1={})",
+            result.registers[1]
+        );
     }
 }
 
@@ -208,7 +214,7 @@ fn mrs_で複数のレジスタに読み込める() {
         encode_mrs(0, 3, 3, 14, 0, 0), // mrs x0, cntfrq_el0
         encode_mrs(1, 3, 3, 14, 0, 1), // mrs x1, cntpct_el0
         encode_mrs(2, 3, 3, 14, 0, 2), // mrs x2, cntvct_el0
-        encode_brk(0),                  // brk #0
+        encode_brk(0),                 // brk #0
     ];
     hv.write_instructions(&instructions)
         .expect("Failed to write instructions");
@@ -244,10 +250,10 @@ fn 仮想タイマーレジスタにアクセスできる() {
     // MRS x1, CNTV_CVAL_EL0
     // BRK #0
     let instructions = vec![
-        0xd28acf00, // mov x0, #0x5678
+        0xd28acf00,                    // mov x0, #0x5678
         encode_msr(0, 3, 3, 14, 3, 2), // msr cntv_cval_el0, x0
         encode_mrs(1, 3, 3, 14, 3, 2), // mrs x1, cntv_cval_el0
-        encode_brk(0),                  // brk #0
+        encode_brk(0),                 // brk #0
     ];
     hv.write_instructions(&instructions)
         .expect("Failed to write instructions");
