@@ -95,6 +95,8 @@ fn test_device_tree_generation() -> Result<Vec<u8>, Box<dyn std::error::Error>> 
         gic_dist_base: memory_map::GIC_DIST_BASE,
         gic_cpu_base: memory_map::GIC_CPU_BASE,
         cmdline: "console=ttyAMA0 earlycon root=/dev/vda rw".to_string(),
+        initrd_start: None,
+        initrd_end: None,
     };
 
     println!("    設定:");

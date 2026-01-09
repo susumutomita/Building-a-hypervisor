@@ -27,6 +27,8 @@ fn test_device_tree_with_kernel() {
         gic_dist_base: 0x0800_0000,
         gic_cpu_base: 0x0801_0000,
         cmdline: "console=ttyAMA0 earlycon".to_string(),
+        initrd_start: None,
+        initrd_end: None,
     };
 
     let dtb = generate_device_tree(&config).unwrap();
@@ -56,6 +58,8 @@ fn test_kernel_image_and_device_tree_integration() {
         gic_dist_base: 0x0800_0000,
         gic_cpu_base: 0x0801_0000,
         cmdline: "console=ttyAMA0".to_string(),
+        initrd_start: None,
+        initrd_end: None,
     };
     let dtb = generate_device_tree(&config).unwrap();
 
