@@ -136,3 +136,8 @@ dist
 
 /target
 test_disk.img
+
+# Generated kernel images
+output/
+disk.img
+test_disk.img

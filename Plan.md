@@ -109,9 +109,9 @@ docs.rs のドキュメントが簡略化されており、実際の API 詳細�
 - [x] ARM64 命令エンコーディングバグ修正
 - [x] HVC PC 進行バグ修正
 - [x] Hypervisor.framework テスト全件通過確認
-- [ ] 実 Linux カーネルでの起動テスト
-- [ ] カーネル起動ログ解析
-- [ ] 不足機能の特定と実装
+- [x] 実 Linux カーネルでの起動テスト ✅ v6.6 起動成功！
+- [x] カーネル起動ログ解析
+- [ ] GIC MMIO ハンドラー登録
 
 **検証手順 (Validation)**:
 - Week 1: `mrs x0, cntpct_el0` でカウンタ値が取得できる
@@ -220,3 +220,31 @@ docs.rs のドキュメントが簡略化されており、実際の API 詳細�
     - MSR/MRS trap (EC=0x18): ELR = instruction PC → 手動で +4 必要
     - WFI/WFE (EC=0x01): ELR = WFI/WFE PC → 手動で +4 必要
     - HVC (EC=0x16): ELR = preferred return (HVC + 4) → +4 不要
+- [2026-01-09] 🎉 Linux カーネル v6.6 起動成功！
+  - Docker で ARM64 Linux カーネルをクロスコンパイル
+    - Dockerfile.linux-build 作成
+    - scripts/build-linux-kernel.sh 作成
+    - 42MB の Image 生成
+  - Data Abort ハンドラーの IPA 取得バグ修正
+    - 問題: FAR_EL1 から 0 が返され、フォールバックで X1 の値（書き込み文字）をアドレスとして使用していた
+    - 原因: Stage 2 フォールトでは FAR_EL1 ではなく exit_info.exception.physical_address を使用すべき
+    - 修正: handle_data_abort() に fault_ipa 引数を追加し、physical_address を使用
+  - 未知のシステムレジスタアクセスをエミュレート
+    - 読み取り時は 0 を返し、書き込み時は無視して続行
+  - linux_boot_test.rs 作成
+    - UartCollector で UART 出力をキャプチャ
+    - 3904 バイトの正常な起動ログを確認
+  - 確認できた起動ログ
+    ```
+    Booting Linux on physical CPU 0x0000000000 [0x610f0000]
+    Linux version 6.6.0 ...
+    Machine model: hypervisor-virt
+    earlycon: pl11 at MMIO 0x0000000009000000
+    printk: bootconsole [pl11] enabled
+    arch_timer: cp15 timer(s) running at 24.00MHz (virt)
+    ...
+    Calibrating delay loop ... 48.00 BogoMIPS
+    LSM: initializing lsm=capability,integrity
+    Mount-cache hash table entries: 512
+    ```
+  - 残課題: GIC レジスタへの MMIO アクセス (0x8000xxx) が未処理

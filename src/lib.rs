@@ -4,7 +4,7 @@ pub mod boot;
 pub mod devices;
 pub mod mmio;
 
-use applevisor::{InterruptType, Mappable, Mapping, MemPerms, Reg, SysReg, Vcpu, VirtualMachine};
+use applevisor::{InterruptType, Mappable, Mapping, MemPerms, Reg, Vcpu, VirtualMachine};
 use devices::interrupt::InterruptController;
 use devices::timer::TimerReg;
 use mmio::MmioManager;
@@ -285,7 +285,9 @@ impl Hypervisor {
                     }
                     0x24 => {
                         // Data Abort from lower EL
-                        if !self.handle_data_abort(syndrome)? {
+                        // physical_address は IPA (Intermediate Physical Address)
+                        let fault_ipa = exit_info.exception.physical_address;
+                        if !self.handle_data_abort(syndrome, fault_ipa)? {
                             return Ok(HypervisorResult {
                                 pc,
                                 registers,
@@ -343,10 +345,15 @@ impl Hypervisor {
     ///
     /// # Arguments
     /// * `syndrome` - ESR_EL2 の値
+    /// * `fault_ipa` - フォールトした IPA (Intermediate Physical Address)
     ///
     /// # Returns
     /// 続行する場合は true、VM Exit する場合は false
-    fn handle_data_abort(&mut self, syndrome: u64) -> Result<bool, Box<dyn std::error::Error>> {
+    fn handle_data_abort(
+        &mut self,
+        syndrome: u64,
+        fault_ipa: u64,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let iss = syndrome & 0x1FF_FFFF; // ISS は下位 25 ビット
 
         // ISV (Instruction Syndrome Valid) ビット [24]
@@ -369,21 +376,8 @@ impl Hypervisor {
             0
         };
 
-        // FnV (FAR not Valid) ビット [9]
-        let fnv = (iss >> 9) & 0x1;
-
-        // FAR_EL2 から fault address を取得
-        // Note: macOS Hypervisor.framework では FAR_EL2 を使用
-        let far = self.vcpu.get_sys_reg(SysReg::FAR_EL1)?;
-
-        // FAR が無効な場合のフォールバック
-        let fault_addr = if fnv != 0 || far == 0 {
-            // FAR が無効な場合、命令をデコードして取得する必要がある
-            // 簡易的に X1 を使用（str/ldr Xn, [X1] パターン用）
-            self.vcpu.get_reg(Reg::X1)?
-        } else {
-            far
-        };
+        // fault_ipa は Hypervisor.framework が提供する IPA
+        let fault_addr = fault_ipa;
 
         // MMIO ハンドリング
         if is_write {
@@ -460,19 +454,25 @@ impl Hypervisor {
         }
 
         // 未対応のシステムレジスタ
-        // デバッグ用: 警告を出力
-        eprintln!(
-            "Unhandled sysreg access: Op0={}, Op1={}, CRn={}, CRm={}, Op2={}, Rt={}, dir={}",
-            op0,
-            op1,
-            crn,
-            crm,
-            op2,
-            rt,
-            if direction == 0 { "read" } else { "write" }
-        );
+        // Linux カーネル起動のためにエミュレート
 
-        Ok(false) // VM Exit
+        // キャッシュ・ID レジスタ (Op0=3, Op1=0-7, CRn=0)
+        // Debug レジスタ (Op0=2)
+        // これらは読み取り時に 0 を返し、書き込み時は無視する
+
+        if direction == 0 {
+            // MRS (read): 0 を返す
+            if rt < 31 {
+                self.set_register_by_index(rt, 0)?;
+            }
+        }
+        // MSR (write): 無視する
+
+        // PC を進める
+        let pc = self.vcpu.get_reg(Reg::PC)?;
+        self.vcpu.set_reg(Reg::PC, pc + 4)?;
+
+        Ok(true) // 続行
     }
 
     /// WFI/WFE (Wait For Interrupt/Event) 例外を処理する
