@@ -5,6 +5,7 @@ pub mod devices;
 pub mod mmio;
 
 use applevisor::{InterruptType, Mappable, Mapping, MemPerms, Reg, Vcpu, VirtualMachine};
+use devices::gic::{create_shared_gic, SharedGicWrapper, GIC_DIST_BASE};
 use devices::interrupt::InterruptController;
 use devices::timer::TimerReg;
 use mmio::MmioManager;
@@ -45,13 +46,24 @@ impl Hypervisor {
         let mut mem = Mapping::new(mem_size)?;
         mem.map(guest_addr, MemPerms::RWX)?;
 
+        // 共有 GIC を作成
+        let shared_gic = create_shared_gic(GIC_DIST_BASE);
+
+        // GIC MMIO ハンドラを登録
+        let mut mmio_manager = MmioManager::new();
+        let gic_wrapper = SharedGicWrapper::new(shared_gic.clone(), GIC_DIST_BASE);
+        mmio_manager.register(Box::new(gic_wrapper));
+
+        // InterruptController は同じ GIC を使用
+        let interrupt_controller = InterruptController::with_gic(shared_gic);
+
         Ok(Self {
             _vm,
             vcpu,
             mem,
             guest_addr,
-            mmio_manager: MmioManager::new(),
-            interrupt_controller: InterruptController::new(),
+            mmio_manager,
+            interrupt_controller,
         })
     }
 

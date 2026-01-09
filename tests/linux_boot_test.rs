@@ -6,7 +6,6 @@
 use applevisor::Reg;
 use hypervisor::boot::device_tree::{generate_device_tree, DeviceTreeConfig};
 use hypervisor::boot::kernel::KernelImage;
-use hypervisor::devices::gic::Gic;
 use hypervisor::devices::uart::Pl011Uart;
 use hypervisor::mmio::MmioHandler;
 use hypervisor::Hypervisor;
@@ -99,9 +98,7 @@ fn linux_カーネルが起動してuart出力する() {
     let uart = UartCollector::new(UART_BASE, Arc::clone(&uart_output));
     hv.register_mmio_handler(Box::new(uart));
 
-    // GIC を登録
-    let gic = Gic::with_base(GIC_BASE);
-    hv.register_mmio_handler(Box::new(gic));
+    // GIC は Hypervisor が自動的に登録する
 
     // カーネルを起動
     println!("\n=== Starting Linux kernel boot ===\n");
@@ -172,9 +169,7 @@ fn linux_カーネルがinitramfsでシェルを起動する() {
     let uart = UartCollector::new(UART_BASE, Arc::clone(&uart_output));
     hv.register_mmio_handler(Box::new(uart));
 
-    // GIC を登録
-    let gic = Gic::with_base(GIC_BASE);
-    hv.register_mmio_handler(Box::new(gic));
+    // GIC は Hypervisor が自動的に登録する
 
     // initramfs をメモリに配置
     let initramfs_end = INITRAMFS_ADDR + initramfs_data.len() as u64;
