@@ -496,9 +496,7 @@ impl MmioHandler for SharedGicWrapper {
 
 /// 共有 GIC を作成するヘルパー関数
 pub fn create_shared_gic(base_addr: u64) -> SharedGic {
-    let mut gic = Gic::new();
-    gic.base_addr = base_addr;
-    Arc::new(Mutex::new(gic))
+    Arc::new(Mutex::new(Gic::with_base(base_addr)))
 }
 
 #[cfg(test)]

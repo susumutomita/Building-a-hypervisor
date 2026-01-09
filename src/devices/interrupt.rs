@@ -2,7 +2,7 @@
 //!
 //! GIC と Timer を統合して、タイマー割り込みを自動的に GIC に配信します。
 
-use super::gic::{SharedGic, GIC_DIST_SIZE};
+use super::gic::{create_shared_gic, SharedGic, GIC_DIST_BASE, GIC_DIST_SIZE};
 use super::timer::{Timer, PHYS_TIMER_IRQ, VIRT_TIMER_IRQ};
 use crate::mmio::MmioHandler;
 
@@ -34,7 +34,7 @@ impl Default for InterruptController {
 impl InterruptController {
     /// 新しい割り込みコントローラーを作成（内部 GIC を使用）
     pub fn new() -> Self {
-        Self::with_gic(super::gic::create_shared_gic(super::gic::GIC_DIST_BASE))
+        Self::with_gic(create_shared_gic(GIC_DIST_BASE))
     }
 
     /// 既存の共有 GIC を使って割り込みコントローラーを作成
