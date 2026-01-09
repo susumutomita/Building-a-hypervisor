@@ -250,6 +250,28 @@ impl Hypervisor {
                 let ec = (syndrome >> 26) & 0x3f;
 
                 match ec {
+                    0x01 => {
+                        // WFI/WFE (Wait For Interrupt/Event)
+                        if !self.handle_wfi_wfe(syndrome)? {
+                            return Ok(HypervisorResult {
+                                pc,
+                                registers,
+                                exit_reason: exit_info.reason,
+                                exception_syndrome: Some(syndrome),
+                            });
+                        }
+                    }
+                    0x16 => {
+                        // HVC (Hypervisor Call) - PSCI
+                        if !self.handle_hvc(syndrome)? {
+                            return Ok(HypervisorResult {
+                                pc,
+                                registers,
+                                exit_reason: exit_info.reason,
+                                exception_syndrome: Some(syndrome),
+                            });
+                        }
+                    }
                     0x18 => {
                         // MSR/MRS (System Register Access)
                         if !self.handle_sysreg_access(syndrome)? {
@@ -310,54 +332,68 @@ impl Hypervisor {
 
     /// Data Abort 例外を処理する
     ///
+    /// ISS (Instruction Specific Syndrome) フィールドの構造:
+    /// - [24]: ISV - Instruction Syndrome Valid
+    /// - [23:22]: SAS - Syndrome Access Size (0=byte, 1=halfword, 2=word, 3=doubleword)
+    /// - [21]: SSE - Syndrome Sign Extend
+    /// - [20:16]: SRT - Syndrome Register Transfer (転送元/先レジスタ番号)
+    /// - [15]: SF - Sixty-Four bit register
+    /// - [9]: FnV - FAR not Valid
+    /// - [6]: WnR - Write not Read
+    ///
     /// # Arguments
     /// * `syndrome` - ESR_EL2 の値
     ///
     /// # Returns
     /// 続行する場合は true、VM Exit する場合は false
     fn handle_data_abort(&mut self, syndrome: u64) -> Result<bool, Box<dyn std::error::Error>> {
-        // WnR ビット: 0 = read, 1 = write
-        let is_write = (syndrome & (1 << 6)) != 0;
+        let iss = syndrome & 0x1FF_FFFF; // ISS は下位 25 ビット
+
+        // ISV (Instruction Syndrome Valid) ビット [24]
+        let isv = (iss >> 24) & 0x1;
+
+        // WnR ビット [6]: 0 = read, 1 = write
+        let is_write = (iss & (1 << 6)) != 0;
 
         // SAS (Syndrome Access Size) ビット [23:22]
         // 0b00 = byte, 0b01 = halfword, 0b10 = word, 0b11 = doubleword
-        let sas = (syndrome >> 22) & 0x3;
+        let sas = (iss >> 22) & 0x3;
         let size = 1 << sas; // 1, 2, 4, 8 bytes
 
-        // FAR_EL1 から fault address を取得
-        // Note: macOS Hypervisor.framework では FAR_EL1 が 0 になることが多い。
-        // これは、例外が EL2 にトラップされた際に FAR_EL1 が設定されないためと思われる。
-        // その場合は命令をデコードして base register から取得する必要がある。
-        let far_el1 = self.vcpu.get_sys_reg(SysReg::FAR_EL1)?;
-
-        // Workaround: FAR_EL1 が 0 の場合、X1 から取得
-        // TODO: 命令を完全にデコードして実際の base register を特定する
-        let fault_addr = if far_el1 == 0 {
-            // とりあえず X1 をフォールバックとして使用
-            // これは str w0, [x1] のような単純な命令では機能するが、
-            // より複雑なアドレッシングモードでは不正確になる可能性がある
-            self.vcpu.get_reg(Reg::X1)?
+        // SRT (Syndrome Register Transfer) ビット [20:16]
+        // 転送元/先レジスタ番号 (0-30 = X0-X30, 31 = XZR)
+        let srt = if isv != 0 {
+            ((iss >> 16) & 0x1F) as u8
         } else {
-            far_el1
+            // ISV が無効の場合、X0 をデフォルトとして使用
+            0
         };
 
-        // デバッグ用: Data Abort の詳細をログ出力
-        // eprintln!(
-        //     "Data Abort: addr=0x{:x}, is_write={}, size={}, syndrome=0x{:x}",
-        //     fault_addr, is_write, size, syndrome
-        // );
+        // FnV (FAR not Valid) ビット [9]
+        let fnv = (iss >> 9) & 0x1;
+
+        // FAR_EL2 から fault address を取得
+        // Note: macOS Hypervisor.framework では FAR_EL2 を使用
+        let far = self.vcpu.get_sys_reg(SysReg::FAR_EL1)?;
+
+        // FAR が無効な場合のフォールバック
+        let fault_addr = if fnv != 0 || far == 0 {
+            // FAR が無効な場合、命令をデコードして取得する必要がある
+            // 簡易的に X1 を使用（str/ldr Xn, [X1] パターン用）
+            self.vcpu.get_reg(Reg::X1)?
+        } else {
+            far
+        };
 
         // MMIO ハンドリング
         if is_write {
-            // 書き込み: X0 から値を取得して MMIO デバイスに書き込む
-            // TODO: ISS の SRT フィールドから実際のレジスタを取得
-            let value = self.vcpu.get_reg(Reg::X0)?;
+            // 書き込み: SRT で指定されたレジスタから値を取得
+            let value = self.get_register_by_index(srt)?;
             self.mmio_manager.handle_write(fault_addr, value, size)?;
         } else {
-            // 読み取り: MMIO デバイスから値を読み取って X0 に設定
-            // TODO: ISS の SRT フィールドから実際のレジスタを取得
+            // 読み取り: MMIO デバイスから値を読み取って SRT レジスタに設定
             let value = self.mmio_manager.handle_read(fault_addr, size)?;
-            self.vcpu.set_reg(Reg::X0, value)?;
+            self.set_register_by_index(srt, value)?;
         }
 
         // PC を進める
@@ -437,6 +473,144 @@ impl Hypervisor {
         );
 
         Ok(false) // VM Exit
+    }
+
+    /// WFI/WFE (Wait For Interrupt/Event) 例外を処理する
+    ///
+    /// # Arguments
+    /// * `_syndrome` - ESR_EL2 の値（現在は未使用）
+    ///
+    /// # Returns
+    /// 続行する場合は true、VM Exit する場合は false
+    fn handle_wfi_wfe(&mut self, _syndrome: u64) -> Result<bool, Box<dyn std::error::Error>> {
+        // タイマー IRQ をポーリング
+        self.interrupt_controller.poll_timer_irqs();
+
+        // ペンディング IRQ があれば即座に続行
+        if self.interrupt_controller.has_pending_irq() {
+            // PC を進める（WFI/WFE 命令の次へ）
+            let pc = self.vcpu.get_reg(Reg::PC)?;
+            self.vcpu.set_reg(Reg::PC, pc + 4)?;
+            return Ok(true);
+        }
+
+        // 次のタイマーイベントまでの時間を計算してスリープ
+        let sleep_nanos = self.interrupt_controller.timer.time_until_next_event();
+
+        if let Some(nanos) = sleep_nanos {
+            // ナノ秒から Duration に変換
+            let duration = std::time::Duration::from_nanos(nanos);
+            // 最大 10ms までスリープ（応答性のため）
+            let max_sleep = std::time::Duration::from_millis(10);
+            let actual_sleep = duration.min(max_sleep);
+            std::thread::sleep(actual_sleep);
+        } else {
+            // タイマーが設定されていない場合は短いスリープ
+            std::thread::sleep(std::time::Duration::from_micros(100));
+        }
+
+        // PC を進める
+        let pc = self.vcpu.get_reg(Reg::PC)?;
+        self.vcpu.set_reg(Reg::PC, pc + 4)?;
+
+        Ok(true) // 続行
+    }
+
+    /// HVC (Hypervisor Call) 例外を処理する - PSCI 実装
+    ///
+    /// # Arguments
+    /// * `_syndrome` - ESR_EL2 の値（現在は未使用）
+    ///
+    /// # Returns
+    /// 続行する場合は true、VM Exit する場合は false
+    fn handle_hvc(&mut self, _syndrome: u64) -> Result<bool, Box<dyn std::error::Error>> {
+        // PSCI Function ID は X0 に格納される
+        let function_id = self.vcpu.get_reg(Reg::X0)?;
+
+        // PSCI 戻り値（デフォルト: SUCCESS）
+        let result = match function_id {
+            // PSCI_VERSION (0x84000000)
+            // Returns: 32-bit version (major << 16 | minor)
+            // PSCI 1.0 を返す
+            0x8400_0000 => {
+                0x0001_0000_u64 // Version 1.0
+            }
+
+            // PSCI_CPU_SUSPEND (0xC4000001) - 64-bit
+            // Args: X1=power_state, X2=entry_point, X3=context_id
+            // CPU をスリープ状態にする（簡易実装: 短いスリープ）
+            0xC400_0001 => {
+                std::thread::sleep(std::time::Duration::from_micros(100));
+                0 // PSCI_SUCCESS
+            }
+
+            // PSCI_CPU_OFF (0x84000002)
+            // CPU をオフにする（シングル vCPU なので VM Exit）
+            // HVC は preferred return なので PC は既に HVC+4 を指している
+            0x8400_0002 => {
+                return Ok(false); // VM Exit
+            }
+
+            // PSCI_CPU_ON (0xC4000003) - 64-bit
+            // Args: X1=target_cpu, X2=entry_point, X3=context_id
+            // シングル vCPU なので ALREADY_ON を返す
+            0xC400_0003 => {
+                0xFFFF_FFFF_FFFF_FFFC_u64 // PSCI_E_ALREADY_ON (-4)
+            }
+
+            // PSCI_AFFINITY_INFO (0xC4000004) - 64-bit
+            // Args: X1=target_affinity, X2=lowest_affinity_level
+            // シングル vCPU なので ON を返す
+            0xC400_0004 => {
+                0 // ON
+            }
+
+            // PSCI_SYSTEM_OFF (0x84000008)
+            // システムをシャットダウン（VM Exit）
+            // HVC は preferred return なので PC は既に HVC+4 を指している
+            0x8400_0008 => {
+                return Ok(false); // VM Exit
+            }
+
+            // PSCI_SYSTEM_RESET (0x84000009)
+            // システムをリセット（VM Exit）
+            // HVC は preferred return なので PC は既に HVC+4 を指している
+            0x8400_0009 => {
+                return Ok(false); // VM Exit
+            }
+
+            // PSCI_FEATURES (0x8400000A)
+            // Args: X1=psci_func_id
+            // 対応している機能を返す
+            0x8400_000A => {
+                let queried_func = self.vcpu.get_reg(Reg::X1)?;
+                match queried_func {
+                    0x8400_0000 | // VERSION
+                    0xC400_0001 | // CPU_SUSPEND
+                    0x8400_0002 | // CPU_OFF
+                    0xC400_0003 | // CPU_ON
+                    0xC400_0004 | // AFFINITY_INFO
+                    0x8400_0008 | // SYSTEM_OFF
+                    0x8400_0009   // SYSTEM_RESET
+                        => 0, // PSCI_SUCCESS (supported)
+                    _ => 0xFFFF_FFFF_FFFF_FFFF_u64, // PSCI_E_NOT_SUPPORTED (-1)
+                }
+            }
+
+            // 未知の PSCI 関数
+            _ => {
+                eprintln!("Unknown PSCI function: 0x{:x}", function_id);
+                0xFFFF_FFFF_FFFF_FFFF_u64 // PSCI_E_NOT_SUPPORTED (-1)
+            }
+        };
+
+        // 結果を X0 に設定
+        self.vcpu.set_reg(Reg::X0, result)?;
+
+        // HVC は preferred return exception なので、PC は既に HVC+4 を指している
+        // PC を進める必要はない
+
+        Ok(true) // 続行
     }
 
     /// レジスタインデックスから値を取得
