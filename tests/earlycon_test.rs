@@ -57,9 +57,9 @@ fn generate_uart_puts_instructions(uart_base: u64, message: &str) -> Vec<u32> {
         // X1 = UART_BASE
         0xD280_0001 | (base_lo << 5), // MOV X1, #base_lo
         0xF2A0_0001 | (base_hi << 5), // MOVK X1, #base_hi, LSL #16
-        // X2 = 文字列へのオフセット (命令数 * 4 + PC)
-        // ADR X2, string_data (PC 相対)
-        // 命令数: 7 (このブロック) + 文字列データの開始位置
+                                      // X2 = 文字列へのオフセット (命令数 * 4 + PC)
+                                      // ADR X2, string_data (PC 相対)
+                                      // 命令数: 7 (このブロック) + 文字列データの開始位置
     ];
 
     // 文字列の長さ
@@ -69,8 +69,8 @@ fn generate_uart_puts_instructions(uart_base: u64, message: &str) -> Vec<u32> {
     // X3 = カウンタ (0 から開始)
     // X4 = 文字列長
     instructions.extend([
-        0xD280_0003,                            // MOV X3, #0 (カウンタ)
-        0xD280_0004 | ((msg_len as u32) << 5),  // MOV X4, #msg_len
+        0xD280_0003,                           // MOV X3, #0 (カウンタ)
+        0xD280_0004 | ((msg_len as u32) << 5), // MOV X4, #msg_len
         // loop:
         0xEB04_007F, // CMP X3, X4
         0x5400_00A0, // B.EQ end (offset = 5 instructions = 20 bytes)
