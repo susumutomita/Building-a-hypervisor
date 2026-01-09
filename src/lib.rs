@@ -320,6 +320,13 @@ impl Hypervisor {
                         });
                     }
                 }
+            } else if let applevisor::ExitReason::VTIMER_ACTIVATED = exit_info.reason {
+                // 仮想タイマーがアクティブになった
+                // タイマー IRQ をポーリングして GIC に反映
+                self.interrupt_controller.poll_timer_irqs();
+
+                // 続行（タイマー割り込みは GIC 経由で配信される）
+                // ゲストが GIC IAR を読むとき、acknowledge() が呼ばれる
             } else {
                 // 予期しない VM Exit
                 return Ok(HypervisorResult {
@@ -749,6 +756,8 @@ impl Hypervisor {
                 gic_dist_base: 0x0800_0000,
                 gic_cpu_base: 0x0801_0000,
                 cmdline: cmdline.to_string(),
+                initrd_start: None,
+                initrd_end: None,
             },
         )?;
 

@@ -118,6 +118,8 @@ fn device_tree_が正しく生成される() {
         gic_dist_base: 0x0800_0000,
         gic_cpu_base: 0x0801_0000,
         cmdline: "console=ttyAMA0 earlycon".to_string(),
+        initrd_start: None,
+        initrd_end: None,
     };
 
     let dtb = generate_device_tree(&config).expect("Failed to generate DTB");

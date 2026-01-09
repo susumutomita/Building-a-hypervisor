@@ -20,6 +20,10 @@ pub struct DeviceTreeConfig {
     pub gic_cpu_base: u64,
     /// Kernel command line
     pub cmdline: String,
+    /// initramfs start address (optional)
+    pub initrd_start: Option<u64>,
+    /// initramfs end address (optional)
+    pub initrd_end: Option<u64>,
 }
 
 impl Default for DeviceTreeConfig {
@@ -32,6 +36,8 @@ impl Default for DeviceTreeConfig {
             gic_dist_base: 0x0800_0000,
             gic_cpu_base: 0x0801_0000,
             cmdline: "console=ttyAMA0 root=/dev/vda rw".to_string(),
+            initrd_start: None,
+            initrd_end: None,
         }
     }
 }
@@ -149,6 +155,11 @@ pub fn generate_device_tree(config: &DeviceTreeConfig) -> Result<Vec<u8>, Box<dy
     let chosen_node = fdt.begin_node("chosen")?;
     fdt.property_string("bootargs", &config.cmdline)?;
     fdt.property_string("stdout-path", &uart_node_name)?;
+    // initramfs (initrd) addresses
+    if let (Some(start), Some(end)) = (config.initrd_start, config.initrd_end) {
+        fdt.property_u64("linux,initrd-start", start)?;
+        fdt.property_u64("linux,initrd-end", end)?;
+    }
     fdt.end_node(chosen_node)?; // chosen
 
     fdt.end_node(root_node)?; // root
@@ -183,6 +194,29 @@ mod tests {
             gic_dist_base: 0x0800_0000,
             gic_cpu_base: 0x0801_0000,
             cmdline: "console=ttyAMA0 earlycon root=/dev/vda rw".to_string(),
+            initrd_start: None,
+            initrd_end: None,
+        };
+
+        let dtb = generate_device_tree(&config).unwrap();
+
+        // DTB should start with FDT magic number
+        assert_eq!(dtb[0..4], [0xd0, 0x0d, 0xfe, 0xed]);
+        assert!(dtb.len() > 100);
+    }
+
+    #[test]
+    fn test_generate_device_tree_with_initrd() {
+        let config = DeviceTreeConfig {
+            memory_base: 0x4000_0000,
+            memory_size: 0x1000_0000, // 256MB
+            uart_base: 0x0900_0000,
+            virtio_base: 0x0a00_0000,
+            gic_dist_base: 0x0800_0000,
+            gic_cpu_base: 0x0801_0000,
+            cmdline: "console=ttyAMA0 rdinit=/init".to_string(),
+            initrd_start: Some(0x4500_0000),
+            initrd_end: Some(0x4600_0000),
         };
 
         let dtb = generate_device_tree(&config).unwrap();
