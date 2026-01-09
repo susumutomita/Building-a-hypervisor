@@ -1,6 +1,10 @@
 //! システムレジスタアクセス (MSR/MRS) の統合テスト
 //!
 //! Phase 4 Week 1: EC=0x18 ハンドリングのテスト
+//!
+//! 注意: これらのテストは Hypervisor.framework が必要なため、
+//! ローカル環境でのみ実行可能（CI ではスキップ）。
+//! ローカルで実行: `cargo test --test sysreg_test -- --ignored`
 
 use hypervisor::devices::timer::TIMER_FREQ;
 use hypervisor::Hypervisor;
@@ -44,6 +48,7 @@ fn encode_brk(imm: u16) -> u32 {
 }
 
 #[test]
+#[ignore = "requires Hypervisor.framework entitlements (run locally with --ignored)"]
 fn mrs_cntfrq_el0_はタイマー周波数を読み取れる() {
     let mut hv = Hypervisor::new(0x10000, 4096).expect("Failed to create hypervisor");
 
@@ -72,6 +77,7 @@ fn mrs_cntfrq_el0_はタイマー周波数を読み取れる() {
 }
 
 #[test]
+#[ignore = "requires Hypervisor.framework entitlements (run locally with --ignored)"]
 fn mrs_cntpct_el0_は物理カウンタを読み取れる() {
     let mut hv = Hypervisor::new(0x10000, 4096).expect("Failed to create hypervisor");
 
@@ -105,6 +111,7 @@ fn mrs_cntpct_el0_は物理カウンタを読み取れる() {
 }
 
 #[test]
+#[ignore = "requires Hypervisor.framework entitlements (run locally with --ignored)"]
 fn mrs_cntvct_el0_は仮想カウンタを読み取れる() {
     let mut hv = Hypervisor::new(0x10000, 4096).expect("Failed to create hypervisor");
 
@@ -124,6 +131,7 @@ fn mrs_cntvct_el0_は仮想カウンタを読み取れる() {
 }
 
 #[test]
+#[ignore = "requires Hypervisor.framework entitlements (run locally with --ignored)"]
 fn msr_cntp_cval_el0_で物理タイマー比較値を書き込める() {
     let mut hv = Hypervisor::new(0x10000, 4096).expect("Failed to create hypervisor");
 
@@ -166,6 +174,7 @@ fn msr_cntp_cval_el0_で物理タイマー比較値を書き込める() {
 }
 
 #[test]
+#[ignore = "requires Hypervisor.framework entitlements (run locally with --ignored)"]
 fn msr_cntp_ctl_el0_で物理タイマーを有効化できる() {
     let mut hv = Hypervisor::new(0x10000, 4096).expect("Failed to create hypervisor");
 
@@ -203,6 +212,7 @@ fn msr_cntp_ctl_el0_で物理タイマーを有効化できる() {
 }
 
 #[test]
+#[ignore = "requires Hypervisor.framework entitlements (run locally with --ignored)"]
 fn mrs_で複数のレジスタに読み込める() {
     let mut hv = Hypervisor::new(0x10000, 4096).expect("Failed to create hypervisor");
 
@@ -242,6 +252,7 @@ fn mrs_で複数のレジスタに読み込める() {
 }
 
 #[test]
+#[ignore = "requires Hypervisor.framework entitlements (run locally with --ignored)"]
 fn 仮想タイマーレジスタにアクセスできる() {
     let mut hv = Hypervisor::new(0x10000, 4096).expect("Failed to create hypervisor");
 

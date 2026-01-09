@@ -1,6 +1,10 @@
 //! 割り込みインジェクションの統合テスト
 //!
 //! Phase 4 Week 2: タイマー割り込みの vCPU インジェクションをテスト
+//!
+//! 注意: これらのテストは Hypervisor.framework が必要なため、
+//! ローカル環境でのみ実行可能（CI ではスキップ）。
+//! ローカルで実行: `cargo test --test interrupt_injection_test -- --ignored`
 
 use hypervisor::devices::timer::TimerReg;
 use hypervisor::Hypervisor;
@@ -11,6 +15,7 @@ fn encode_brk(imm: u16) -> u32 {
 }
 
 #[test]
+#[ignore = "requires Hypervisor.framework entitlements (run locally with --ignored)"]
 fn interrupt_controller_が正しく初期化される() {
     let hv = Hypervisor::new(0x10000, 4096).expect("Failed to create hypervisor");
 
@@ -21,6 +26,7 @@ fn interrupt_controller_が正しく初期化される() {
 }
 
 #[test]
+#[ignore = "requires Hypervisor.framework entitlements (run locally with --ignored)"]
 fn タイマーを設定すると割り込みがペンディングになる() {
     let mut hv = Hypervisor::new(0x10000, 4096).expect("Failed to create hypervisor");
 
@@ -45,6 +51,7 @@ fn タイマーを設定すると割り込みがペンディングになる() {
 }
 
 #[test]
+#[ignore = "requires Hypervisor.framework entitlements (run locally with --ignored)"]
 fn acknowledge_と_eoi_のフローが動作する() {
     let mut hv = Hypervisor::new(0x10000, 4096).expect("Failed to create hypervisor");
 
@@ -76,6 +83,7 @@ fn acknowledge_と_eoi_のフローが動作する() {
 }
 
 #[test]
+#[ignore = "requires Hypervisor.framework entitlements (run locally with --ignored)"]
 fn タイマーなしでゲストを実行できる() {
     let mut hv = Hypervisor::new(0x10000, 4096).expect("Failed to create hypervisor");
 
@@ -94,6 +102,7 @@ fn タイマーなしでゲストを実行できる() {
 }
 
 #[test]
+#[ignore = "requires Hypervisor.framework entitlements (run locally with --ignored)"]
 fn gic_有効時でもゲストを実行できる() {
     let mut hv = Hypervisor::new(0x10000, 4096).expect("Failed to create hypervisor");
 
@@ -116,6 +125,7 @@ fn gic_有効時でもゲストを実行できる() {
 }
 
 #[test]
+#[ignore = "requires Hypervisor.framework entitlements (run locally with --ignored)"]
 fn ペンディングirqがない場合はインジェクトしない() {
     let mut hv = Hypervisor::new(0x10000, 4096).expect("Failed to create hypervisor");
 
