@@ -478,12 +478,18 @@ impl MmioHandler for SharedGicWrapper {
     }
 
     fn read(&mut self, offset: u64, size: usize) -> Result<u64, Box<dyn Error>> {
-        let mut gic = self.gic.lock().map_err(|e| format!("GIC lock error: {}", e))?;
+        let mut gic = self
+            .gic
+            .lock()
+            .map_err(|e| format!("GIC lock error: {}", e))?;
         gic.read(offset, size)
     }
 
     fn write(&mut self, offset: u64, value: u64, size: usize) -> Result<(), Box<dyn Error>> {
-        let mut gic = self.gic.lock().map_err(|e| format!("GIC lock error: {}", e))?;
+        let mut gic = self
+            .gic
+            .lock()
+            .map_err(|e| format!("GIC lock error: {}", e))?;
         gic.write(offset, value, size)
     }
 }
