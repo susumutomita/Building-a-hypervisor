@@ -290,6 +290,42 @@ pub enum TimerReg {
     CNTVOFF_EL2,
 }
 
+impl TimerReg {
+    /// システムレジスタエンコーディングから TimerReg を取得
+    ///
+    /// # Arguments
+    /// * `op0` - Op0 フィールド (2 bits)
+    /// * `op1` - Op1 フィールド (3 bits)
+    /// * `crn` - CRn フィールド (4 bits)
+    /// * `crm` - CRm フィールド (4 bits)
+    /// * `op2` - Op2 フィールド (3 bits)
+    ///
+    /// # Returns
+    /// 対応する TimerReg があれば Some、なければ None
+    pub fn from_encoding(op0: u8, op1: u8, crn: u8, crm: u8, op2: u8) -> Option<Self> {
+        // Timer レジスタは CRn=14 が共通
+        if crn != 14 {
+            return None;
+        }
+
+        match (op0, op1, crm, op2) {
+            // EL0 タイマーレジスタ (Op0=3, Op1=3)
+            (3, 3, 0, 0) => Some(TimerReg::CNTFRQ_EL0),
+            (3, 3, 0, 1) => Some(TimerReg::CNTPCT_EL0),
+            (3, 3, 0, 2) => Some(TimerReg::CNTVCT_EL0),
+            (3, 3, 2, 0) => Some(TimerReg::CNTP_TVAL_EL0),
+            (3, 3, 2, 1) => Some(TimerReg::CNTP_CTL_EL0),
+            (3, 3, 2, 2) => Some(TimerReg::CNTP_CVAL_EL0),
+            (3, 3, 3, 0) => Some(TimerReg::CNTV_TVAL_EL0),
+            (3, 3, 3, 1) => Some(TimerReg::CNTV_CTL_EL0),
+            (3, 3, 3, 2) => Some(TimerReg::CNTV_CVAL_EL0),
+            // EL2 タイマーレジスタ (Op0=3, Op1=4)
+            (3, 4, 0, 3) => Some(TimerReg::CNTVOFF_EL2),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -453,5 +489,86 @@ mod tests {
 
         let irqs = timer.get_pending_irqs();
         assert!(irqs.contains(&PHYS_TIMER_IRQ));
+    }
+
+    #[test]
+    fn from_encoding_でcntfrq_el0を正しく識別する() {
+        // CNTFRQ_EL0: Op0=3, Op1=3, CRn=14, CRm=0, Op2=0
+        let reg = TimerReg::from_encoding(3, 3, 14, 0, 0);
+        assert_eq!(reg, Some(TimerReg::CNTFRQ_EL0));
+    }
+
+    #[test]
+    fn from_encoding_でcntpct_el0を正しく識別する() {
+        // CNTPCT_EL0: Op0=3, Op1=3, CRn=14, CRm=0, Op2=1
+        let reg = TimerReg::from_encoding(3, 3, 14, 0, 1);
+        assert_eq!(reg, Some(TimerReg::CNTPCT_EL0));
+    }
+
+    #[test]
+    fn from_encoding_でcntvct_el0を正しく識別する() {
+        // CNTVCT_EL0: Op0=3, Op1=3, CRn=14, CRm=0, Op2=2
+        let reg = TimerReg::from_encoding(3, 3, 14, 0, 2);
+        assert_eq!(reg, Some(TimerReg::CNTVCT_EL0));
+    }
+
+    #[test]
+    fn from_encoding_でcntp_ctl_el0を正しく識別する() {
+        // CNTP_CTL_EL0: Op0=3, Op1=3, CRn=14, CRm=2, Op2=1
+        let reg = TimerReg::from_encoding(3, 3, 14, 2, 1);
+        assert_eq!(reg, Some(TimerReg::CNTP_CTL_EL0));
+    }
+
+    #[test]
+    fn from_encoding_でcntp_cval_el0を正しく識別する() {
+        // CNTP_CVAL_EL0: Op0=3, Op1=3, CRn=14, CRm=2, Op2=2
+        let reg = TimerReg::from_encoding(3, 3, 14, 2, 2);
+        assert_eq!(reg, Some(TimerReg::CNTP_CVAL_EL0));
+    }
+
+    #[test]
+    fn from_encoding_でcntp_tval_el0を正しく識別する() {
+        // CNTP_TVAL_EL0: Op0=3, Op1=3, CRn=14, CRm=2, Op2=0
+        let reg = TimerReg::from_encoding(3, 3, 14, 2, 0);
+        assert_eq!(reg, Some(TimerReg::CNTP_TVAL_EL0));
+    }
+
+    #[test]
+    fn from_encoding_でcntv_ctl_el0を正しく識別する() {
+        // CNTV_CTL_EL0: Op0=3, Op1=3, CRn=14, CRm=3, Op2=1
+        let reg = TimerReg::from_encoding(3, 3, 14, 3, 1);
+        assert_eq!(reg, Some(TimerReg::CNTV_CTL_EL0));
+    }
+
+    #[test]
+    fn from_encoding_でcntv_cval_el0を正しく識別する() {
+        // CNTV_CVAL_EL0: Op0=3, Op1=3, CRn=14, CRm=3, Op2=2
+        let reg = TimerReg::from_encoding(3, 3, 14, 3, 2);
+        assert_eq!(reg, Some(TimerReg::CNTV_CVAL_EL0));
+    }
+
+    #[test]
+    fn from_encoding_でcntv_tval_el0を正しく識別する() {
+        // CNTV_TVAL_EL0: Op0=3, Op1=3, CRn=14, CRm=3, Op2=0
+        let reg = TimerReg::from_encoding(3, 3, 14, 3, 0);
+        assert_eq!(reg, Some(TimerReg::CNTV_TVAL_EL0));
+    }
+
+    #[test]
+    fn from_encoding_でcntvoff_el2を正しく識別する() {
+        // CNTVOFF_EL2: Op0=3, Op1=4, CRn=14, CRm=0, Op2=3
+        let reg = TimerReg::from_encoding(3, 4, 14, 0, 3);
+        assert_eq!(reg, Some(TimerReg::CNTVOFF_EL2));
+    }
+
+    #[test]
+    fn from_encoding_で未対応のレジスタはnoneを返す() {
+        // CRn != 14
+        let reg = TimerReg::from_encoding(3, 3, 0, 0, 0);
+        assert_eq!(reg, None);
+
+        // 存在しない組み合わせ
+        let reg = TimerReg::from_encoding(3, 3, 14, 5, 0);
+        assert_eq!(reg, None);
     }
 }

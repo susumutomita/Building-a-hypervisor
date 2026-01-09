@@ -4,7 +4,9 @@ pub mod boot;
 pub mod devices;
 pub mod mmio;
 
-use applevisor::{Mappable, Mapping, MemPerms, Reg, SysReg, Vcpu, VirtualMachine};
+use applevisor::{InterruptType, Mappable, Mapping, MemPerms, Reg, SysReg, Vcpu, VirtualMachine};
+use devices::interrupt::InterruptController;
+use devices::timer::TimerReg;
 use mmio::MmioManager;
 use std::mem::ManuallyDrop;
 
@@ -27,6 +29,7 @@ pub struct Hypervisor {
     mem: Mapping,
     guest_addr: u64,
     mmio_manager: MmioManager,
+    interrupt_controller: InterruptController,
 }
 
 impl Hypervisor {
@@ -48,6 +51,7 @@ impl Hypervisor {
             mem,
             guest_addr,
             mmio_manager: MmioManager::new(),
+            interrupt_controller: InterruptController::new(),
         })
     }
 
@@ -190,6 +194,16 @@ impl Hypervisor {
 
         // ゲストプログラムを実行
         loop {
+            // タイマー IRQ をポーリングして GIC に反映
+            self.interrupt_controller.poll_timer_irqs();
+
+            // ペンディング IRQ があれば vCPU にインジェクト
+            if self.interrupt_controller.has_pending_irq() {
+                self.vcpu.set_pending_interrupt(InterruptType::IRQ, true)?;
+            } else {
+                self.vcpu.set_pending_interrupt(InterruptType::IRQ, false)?;
+            }
+
             self.vcpu.run()?;
             let exit_info = self.vcpu.get_exit_info();
 
@@ -236,6 +250,17 @@ impl Hypervisor {
                 let ec = (syndrome >> 26) & 0x3f;
 
                 match ec {
+                    0x18 => {
+                        // MSR/MRS (System Register Access)
+                        if !self.handle_sysreg_access(syndrome)? {
+                            return Ok(HypervisorResult {
+                                pc,
+                                registers,
+                                exit_reason: exit_info.reason,
+                                exception_syndrome: Some(syndrome),
+                            });
+                        }
+                    }
                     0x24 => {
                         // Data Abort from lower EL
                         if !self.handle_data_abort(syndrome)? {
@@ -340,6 +365,180 @@ impl Hypervisor {
         self.vcpu.set_reg(Reg::PC, pc + 4)?;
 
         Ok(true) // 続行
+    }
+
+    /// システムレジスタアクセス (MSR/MRS) 例外を処理する
+    ///
+    /// # Arguments
+    /// * `syndrome` - ESR_EL2 の値
+    ///
+    /// # Returns
+    /// 続行する場合は true、VM Exit する場合は false
+    fn handle_sysreg_access(&mut self, syndrome: u64) -> Result<bool, Box<dyn std::error::Error>> {
+        // ISS フィールドをデコード
+        // ISS encoding for MSR/MRS (EC=0x18):
+        // [24:22] = Op0 (2 bits used)
+        // [21:19] = Op2 (3 bits)
+        // [18:16] = Op1 (3 bits)
+        // [15:12] = CRn (4 bits)
+        // [11:8] = Rt (5 bits in ISS[9:5], but use lower 4 bits for X0-X30)
+        // [7:4] = CRm (4 bits in ISS[4:1])
+        // [0] = Direction (0 = read/MRS, 1 = write/MSR)
+
+        // 正しい ISS エンコーディング (ARM ARM D17.2.37)
+        let iss = syndrome & 0x1FFFFFF; // ISS は下位25ビット
+        let direction = iss & 0x1; // 0 = MRS (read), 1 = MSR (write)
+        let crm = ((iss >> 1) & 0xf) as u8;
+        let rt = ((iss >> 5) & 0x1f) as u8; // Rt (0-30, 31 = XZR)
+        let crn = ((iss >> 10) & 0xf) as u8;
+        let op1 = ((iss >> 14) & 0x7) as u8;
+        let op2 = ((iss >> 17) & 0x7) as u8;
+        let op0 = ((iss >> 20) & 0x3) as u8;
+
+        // Timer レジスタかどうか判定
+        if let Some(timer_reg) = TimerReg::from_encoding(op0, op1, crn, crm, op2) {
+            if direction == 0 {
+                // MRS (read): Timer レジスタの値を Rt に設定
+                let value = self.interrupt_controller.timer.read_sysreg(timer_reg)?;
+                if rt < 31 {
+                    self.set_register_by_index(rt, value)?;
+                }
+                // rt == 31 は XZR なので何もしない
+            } else {
+                // MSR (write): Rt の値を Timer レジスタに設定
+                let value = if rt < 31 {
+                    self.get_register_by_index(rt)?
+                } else {
+                    0 // XZR
+                };
+                self.interrupt_controller
+                    .timer
+                    .write_sysreg(timer_reg, value)?;
+            }
+
+            // PC を進める
+            let pc = self.vcpu.get_reg(Reg::PC)?;
+            self.vcpu.set_reg(Reg::PC, pc + 4)?;
+
+            return Ok(true); // 続行
+        }
+
+        // 未対応のシステムレジスタ
+        // デバッグ用: 警告を出力
+        eprintln!(
+            "Unhandled sysreg access: Op0={}, Op1={}, CRn={}, CRm={}, Op2={}, Rt={}, dir={}",
+            op0,
+            op1,
+            crn,
+            crm,
+            op2,
+            rt,
+            if direction == 0 { "read" } else { "write" }
+        );
+
+        Ok(false) // VM Exit
+    }
+
+    /// レジスタインデックスから値を取得
+    fn get_register_by_index(&self, index: u8) -> Result<u64, Box<dyn std::error::Error>> {
+        let reg = match index {
+            0 => Reg::X0,
+            1 => Reg::X1,
+            2 => Reg::X2,
+            3 => Reg::X3,
+            4 => Reg::X4,
+            5 => Reg::X5,
+            6 => Reg::X6,
+            7 => Reg::X7,
+            8 => Reg::X8,
+            9 => Reg::X9,
+            10 => Reg::X10,
+            11 => Reg::X11,
+            12 => Reg::X12,
+            13 => Reg::X13,
+            14 => Reg::X14,
+            15 => Reg::X15,
+            16 => Reg::X16,
+            17 => Reg::X17,
+            18 => Reg::X18,
+            19 => Reg::X19,
+            20 => Reg::X20,
+            21 => Reg::X21,
+            22 => Reg::X22,
+            23 => Reg::X23,
+            24 => Reg::X24,
+            25 => Reg::X25,
+            26 => Reg::X26,
+            27 => Reg::X27,
+            28 => Reg::X28,
+            29 => Reg::X29,
+            30 => Reg::X30,
+            _ => return Ok(0), // XZR
+        };
+        self.get_reg(reg)
+    }
+
+    /// レジスタインデックスに値を設定
+    fn set_register_by_index(
+        &self,
+        index: u8,
+        value: u64,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let reg = match index {
+            0 => Reg::X0,
+            1 => Reg::X1,
+            2 => Reg::X2,
+            3 => Reg::X3,
+            4 => Reg::X4,
+            5 => Reg::X5,
+            6 => Reg::X6,
+            7 => Reg::X7,
+            8 => Reg::X8,
+            9 => Reg::X9,
+            10 => Reg::X10,
+            11 => Reg::X11,
+            12 => Reg::X12,
+            13 => Reg::X13,
+            14 => Reg::X14,
+            15 => Reg::X15,
+            16 => Reg::X16,
+            17 => Reg::X17,
+            18 => Reg::X18,
+            19 => Reg::X19,
+            20 => Reg::X20,
+            21 => Reg::X21,
+            22 => Reg::X22,
+            23 => Reg::X23,
+            24 => Reg::X24,
+            25 => Reg::X25,
+            26 => Reg::X26,
+            27 => Reg::X27,
+            28 => Reg::X28,
+            29 => Reg::X29,
+            30 => Reg::X30,
+            _ => return Ok(()), // XZR - 何もしない
+        };
+        self.set_reg(reg, value)
+    }
+
+    /// Timer への参照を取得
+    pub fn timer(&self) -> &devices::timer::Timer {
+        &self.interrupt_controller.timer
+    }
+
+    /// Timer への可変参照を取得
+    pub fn timer_mut(&mut self) -> &mut devices::timer::Timer {
+        &mut self.interrupt_controller.timer
+    }
+
+    /// InterruptController への参照を取得
+    pub fn interrupt_controller(&self) -> &InterruptController {
+        &self.interrupt_controller
+    }
+
+    /// InterruptController への可変参照を取得
+    pub fn interrupt_controller_mut(&mut self) -> &mut InterruptController {
+        &mut self.interrupt_controller
     }
 
     /// Linux カーネルをブートする
