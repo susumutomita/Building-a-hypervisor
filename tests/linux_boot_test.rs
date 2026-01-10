@@ -49,8 +49,8 @@ impl MmioHandler for UartCollector {
             if let Ok(mut output) = self.output.lock() {
                 output.push(byte);
             }
-            // 標準出力にも出力
-            print!("{}", byte as char);
+            // 標準出力にも出力 (inner.write でも出力されるのでスキップ)
+            // print!("{}", byte as char);
         }
         self.inner.write(offset, value, size)
     }

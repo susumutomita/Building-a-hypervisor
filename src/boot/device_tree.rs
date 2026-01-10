@@ -114,19 +114,21 @@ pub fn generate_device_tree(config: &DeviceTreeConfig) -> Result<Vec<u8>, Box<dy
     fdt.end_node(gic_node)?; // intc
 
     // Timer node (ARM Generic Timer)
+    // Virtual Timer のみを使用（Physical Timer はハイパーバイザーが使用）
     // PPI IRQs: Secure Phys=13, Non-secure Phys=14, Virt=11, Hyp=10
     let timer_node = fdt.begin_node("timer")?;
     fdt.property_string("compatible", "arm,armv8-timer")?;
     // interrupts: <type irq flags> for each timer
     // type: 1=PPI, irq: actual IRQ number (PPI base is 16, so subtract 16)
-    // flags: 0x304 = edge-triggered, active-low (common for timer)
+    // flags: 0xf08 = level-high, CPU0 only
+    // Virtual Timer のみ有効（他は無効な割り込みとして 0xfff でマーク）
     fdt.property_array_u32(
         "interrupts",
         &[
-            1, 13, 0x304, // Secure Physical Timer (IRQ 29)
-            1, 14, 0x304, // Non-secure Physical Timer (IRQ 30)
-            1, 11, 0x304, // Virtual Timer (IRQ 27)
-            1, 10, 0x304, // Hypervisor Timer (IRQ 26)
+            1, 13, 0xf08, // Secure Physical Timer (IRQ 29) - masked
+            1, 14, 0xf08, // Non-secure Physical Timer (IRQ 30) - masked
+            1, 11, 0xf08, // Virtual Timer (IRQ 27) - level-high
+            1, 10, 0xf08, // Hypervisor Timer (IRQ 26) - masked
         ],
     )?;
     fdt.property_null("always-on")?;

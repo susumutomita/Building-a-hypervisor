@@ -10,8 +10,8 @@ use std::error::Error;
 use std::time::Instant;
 
 /// タイマー周波数 (Hz)
-/// ARM では通常 1GHz または 24MHz など
-pub const TIMER_FREQ: u64 = 62_500_000; // 62.5 MHz (QEMU virt のデフォルト)
+/// Apple Silicon のホスト CNTFRQ_EL0 の値と一致させる
+pub const TIMER_FREQ: u64 = 24_000_000; // 24 MHz (Apple Silicon)
 
 /// 物理タイマー IRQ (PPI)
 pub const PHYS_TIMER_IRQ: u32 = 30;
@@ -179,6 +179,14 @@ impl Timer {
         self.virt_timer.should_interrupt(self.get_virt_counter())
     }
 
+    /// 仮想タイマーがアサートされているか（IMASK を無視）
+    ///
+    /// GIC 経由で IRQ を注入する場合、ハードウェア FIQ 防止のために IMASK=1 を強制している。
+    /// そのため IMASK を無視してタイマー発火を検出する必要がある。
+    pub fn virt_timer_asserted(&self) -> bool {
+        self.virt_timer.is_asserted(self.get_virt_counter())
+    }
+
     /// ペンディング中のタイマー IRQ を取得
     pub fn get_pending_irqs(&self) -> Vec<u32> {
         let mut irqs = Vec::new();
@@ -244,6 +252,23 @@ impl Timer {
     pub fn write_sysreg(&mut self, reg: TimerReg, value: u64) -> Result<(), Box<dyn Error>> {
         let phys_counter = self.get_phys_counter();
         let virt_counter = self.get_virt_counter();
+
+        // デバッグ: 仮想タイマーへの書き込みをログ
+        static mut VIRT_TIMER_WRITE_COUNT: u64 = 0;
+        match reg {
+            TimerReg::CNTV_CTL_EL0 | TimerReg::CNTV_CVAL_EL0 | TimerReg::CNTV_TVAL_EL0 => {
+                unsafe {
+                    VIRT_TIMER_WRITE_COUNT += 1;
+                    if VIRT_TIMER_WRITE_COUNT <= 10 {
+                        eprintln!(
+                            "[VTIMER WRITE #{}] {:?} = 0x{:x}, counter = 0x{:x}",
+                            VIRT_TIMER_WRITE_COUNT, reg, value, virt_counter
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
 
         match reg {
             TimerReg::CNTFRQ_EL0 => {
