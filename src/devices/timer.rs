@@ -252,23 +252,7 @@ impl Timer {
     pub fn write_sysreg(&mut self, reg: TimerReg, value: u64) -> Result<(), Box<dyn Error>> {
         let phys_counter = self.get_phys_counter();
         let virt_counter = self.get_virt_counter();
-
-        // デバッグ: 仮想タイマーへの書き込みをログ
-        static mut VIRT_TIMER_WRITE_COUNT: u64 = 0;
-        match reg {
-            TimerReg::CNTV_CTL_EL0 | TimerReg::CNTV_CVAL_EL0 | TimerReg::CNTV_TVAL_EL0 => {
-                unsafe {
-                    VIRT_TIMER_WRITE_COUNT += 1;
-                    if VIRT_TIMER_WRITE_COUNT <= 10 {
-                        eprintln!(
-                            "[VTIMER WRITE #{}] {:?} = 0x{:x}, counter = 0x{:x}",
-                            VIRT_TIMER_WRITE_COUNT, reg, value, virt_counter
-                        );
-                    }
-                }
-            }
-            _ => {}
-        }
+        let _ = virt_counter; // 将来のデバッグ用に保持
 
         match reg {
             TimerReg::CNTFRQ_EL0 => {

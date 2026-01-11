@@ -11,6 +11,119 @@ use devices::timer::TimerReg;
 use mmio::MmioManager;
 use std::mem::ManuallyDrop;
 
+/// レジスタインデックスから Reg enum への変換テーブル
+const REGISTER_TABLE: [Reg; 31] = [
+    Reg::X0,
+    Reg::X1,
+    Reg::X2,
+    Reg::X3,
+    Reg::X4,
+    Reg::X5,
+    Reg::X6,
+    Reg::X7,
+    Reg::X8,
+    Reg::X9,
+    Reg::X10,
+    Reg::X11,
+    Reg::X12,
+    Reg::X13,
+    Reg::X14,
+    Reg::X15,
+    Reg::X16,
+    Reg::X17,
+    Reg::X18,
+    Reg::X19,
+    Reg::X20,
+    Reg::X21,
+    Reg::X22,
+    Reg::X23,
+    Reg::X24,
+    Reg::X25,
+    Reg::X26,
+    Reg::X27,
+    Reg::X28,
+    Reg::X29,
+    Reg::X30,
+];
+
+/// デバッグ統計情報
+#[derive(Debug, Default)]
+struct DebugStats {
+    exit_count: u64,
+    wfi_count: u64,
+    mmio_count: u64,
+    vtimer_activated_count: u64,
+    other_exception_count: u64,
+    timer_pending_count: u64,
+    timer_sync_count: u64,
+    sw_timer_fire_count: u64,
+}
+
+impl DebugStats {
+    fn log_timer_pending(&mut self) {
+        self.timer_pending_count += 1;
+        if self.timer_pending_count <= 10 {
+            eprintln!("[TIMER] IRQ pending #{}", self.timer_pending_count);
+        }
+    }
+
+    fn log_timer_sync(&mut self, guest_ctl: u64, guest_cval: u64, virt_counter: u64) {
+        self.timer_sync_count += 1;
+        if self.timer_sync_count <= 20 || self.timer_sync_count % 5000 == 0 {
+            let enabled = (guest_ctl & 0x1) != 0;
+            let imask = (guest_ctl & 0x2) != 0;
+            eprintln!(
+                "[TIMER_SYNC #{}] guest_ctl=0x{:x} (enabled={}, imask={}), guest_cval=0x{:x}, sw_counter=0x{:x}",
+                self.timer_sync_count, guest_ctl, enabled, imask, guest_cval, virt_counter
+            );
+        }
+    }
+
+    fn log_sw_timer_fire(&mut self, hw_counter: u64, cval: u64) {
+        self.sw_timer_fire_count += 1;
+        if self.sw_timer_fire_count <= 20 || self.sw_timer_fire_count % 1000 == 0 {
+            eprintln!(
+                "[SW_TIMER_FIRE #{}] counter=0x{:x} >= cval=0x{:x} -> injecting IRQ via GIC",
+                self.sw_timer_fire_count, hw_counter, cval
+            );
+        }
+    }
+
+    fn log_vtimer_activated(&mut self) {
+        self.vtimer_activated_count += 1;
+        if self.vtimer_activated_count <= 10 {
+            eprintln!(
+                "[VTIMER_ACTIVATED #{}] Timer fired!",
+                self.vtimer_activated_count
+            );
+        }
+    }
+
+    fn log_exit_summary(&self, post_run_ctl: u64, post_run_cval: u64, hw_counter: u64, gic_pending: bool) {
+        let timer_enabled = (post_run_ctl & 0x1) != 0;
+        let timer_imask = (post_run_ctl & 0x2) != 0;
+        let istatus = timer_enabled && hw_counter >= post_run_cval;
+        eprintln!(
+            "[TIMER STATE @{}] CTL=0x{:x} (enable={}, imask={}, istatus={}), CVAL=0x{:x}, counter=0x{:x}",
+            self.exit_count, post_run_ctl, timer_enabled, timer_imask, istatus, post_run_cval, hw_counter
+        );
+        eprintln!(
+            "[STATS @{}] WFI={}, MMIO={}, VTIMER_ACTIVATED={}, OTHER_EXC={}, GIC_pending={}",
+            self.exit_count, self.wfi_count, self.mmio_count, self.vtimer_activated_count,
+            self.other_exception_count, gic_pending
+        );
+    }
+}
+
+/// ハードウェアカウンタを読み取る
+fn read_hardware_counter() -> u64 {
+    let counter: u64;
+    unsafe {
+        std::arch::asm!("mrs {}, cntvct_el0", out(reg) counter);
+    }
+    counter
+}
+
 /// ハイパーバイザーの実行結果
 pub struct HypervisorResult {
     /// VM Exit が発生したときの PC (Program Counter)
@@ -31,6 +144,7 @@ pub struct Hypervisor {
     guest_addr: u64,
     mmio_manager: MmioManager,
     interrupt_controller: InterruptController,
+    debug_stats: DebugStats,
 }
 
 impl Hypervisor {
@@ -101,6 +215,7 @@ impl Hypervisor {
             guest_addr,
             mmio_manager,
             interrupt_controller,
+            debug_stats: DebugStats::default(),
         })
     }
 
@@ -241,53 +356,25 @@ impl Hypervisor {
             self.vcpu.set_trap_debug_exceptions(true)?;
         }
 
-        // デバッグ用カウンタ
-        static mut TIMER_PENDING_COUNT: u64 = 0;
-
         // ゲストプログラムを実行
         loop {
-            // ソフトウェアタイマー: poll_timer_irqs() がソフトウェアタイマーの状態をチェックし
-            // タイマーが発火していれば GIC に IRQ をセットする
+            // タイマー IRQ をポーリング
             let had_pending_before = self.interrupt_controller.has_pending_irq();
             self.interrupt_controller.poll_timer_irqs();
             let has_pending_after = self.interrupt_controller.has_pending_irq();
 
-            // タイマー IRQ がペンディングになったかデバッグ
             if !had_pending_before && has_pending_after {
-                unsafe {
-                    TIMER_PENDING_COUNT += 1;
-                    if TIMER_PENDING_COUNT <= 10 {
-                        eprintln!("[TIMER] IRQ pending #{}", TIMER_PENDING_COUNT);
-                    }
-                }
+                self.debug_stats.log_timer_pending();
             }
 
-            // FIQ をクリア（ハードウェアタイマーからの FIQ を抑制）
+            // FIQ をクリアし、IRQ 状態を更新
             self.vcpu.set_pending_interrupt(InterruptType::FIQ, false)?;
+            self.vcpu.set_pending_interrupt(
+                InterruptType::IRQ,
+                self.interrupt_controller.has_pending_irq(),
+            )?;
 
-            // ペンディング IRQ があれば vCPU にインジェクト
-            if self.interrupt_controller.has_pending_irq() {
-                self.vcpu.set_pending_interrupt(InterruptType::IRQ, true)?;
-            } else {
-                self.vcpu.set_pending_interrupt(InterruptType::IRQ, false)?;
-            }
-
-            // ============================================================
-            // ハードウェア vtimer を完全に無効化して FIQ を防止
-            // ============================================================
-            // 戦略:
-            // 1. vcpu.run() 前にゲストが設定した CTL/CVAL を読み取り
-            // 2. その値をソフトウェアタイマーにコピー
-            // 3. ハードウェア vtimer を無効化 (ENABLE=0, IMASK=1, CVAL=i64::MAX)
-            // 4. vcpu.run()
-            // 5. ソフトウェアで発火を検出し GIC 経由で IRQ を注入
-            //
-            // 注: ゲストからの MSR 命令はトラップされないため、ゲストは
-            //     ハードウェアレジスタに直接書き込む。次の vcpu.run() 前に
-            //     その値を読み取ってソフトウェアタイマーに反映する。
-
-            // 前回の vcpu.run() でゲストが設定した CTL/CVAL を読み取り
-            // (リセット前に読み取ることで、ゲストの設定を正しく取得)
+            // ゲストのタイマー設定を読み取りソフトウェアタイマーに同期
             let guest_ctl = self
                 .vcpu
                 .get_sys_reg(applevisor::SysReg::CNTV_CTL_EL0)
@@ -297,43 +384,29 @@ impl Hypervisor {
                 .get_sys_reg(applevisor::SysReg::CNTV_CVAL_EL0)
                 .unwrap_or(i64::MAX as u64);
 
-            // ゲストが設定した値をソフトウェアタイマーにコピー
-            // これにより poll_timer_irqs() がソフトウェアで発火を検出できる
-            {
-                let virt_counter = self.interrupt_controller.timer.get_virt_counter();
-                self.interrupt_controller.timer.virt_timer.write_ctl(guest_ctl);
-                self.interrupt_controller.timer.virt_timer.write_cval(guest_cval);
+            let virt_counter = self.interrupt_controller.timer.get_virt_counter();
+            self.interrupt_controller
+                .timer
+                .virt_timer
+                .write_ctl(guest_ctl);
+            self.interrupt_controller
+                .timer
+                .virt_timer
+                .write_cval(guest_cval);
 
-                // デバッグ: ゲストのタイマー設定をログ
-                static mut GUEST_TIMER_SYNC_COUNT: u64 = 0;
-                unsafe {
-                    GUEST_TIMER_SYNC_COUNT += 1;
-                    if GUEST_TIMER_SYNC_COUNT <= 20 || GUEST_TIMER_SYNC_COUNT % 5000 == 0 {
-                        let enabled = (guest_ctl & 0x1) != 0;
-                        let imask = (guest_ctl & 0x2) != 0;
-                        eprintln!(
-                            "[TIMER_SYNC #{}] guest_ctl=0x{:x} (enabled={}, imask={}), guest_cval=0x{:x}, sw_counter=0x{:x}",
-                            GUEST_TIMER_SYNC_COUNT, guest_ctl, enabled, imask, guest_cval, virt_counter
-                        );
-                    }
-                }
-            }
+            self.debug_stats
+                .log_timer_sync(guest_ctl, guest_cval, virt_counter);
 
-            // FIQ 防止: ハードウェアタイマーを完全に無効化
-            // ゲストが vcpu.run() 中にタイマーを有効化しても、FIQ が発生しないようにする
-            // CVAL を遠い未来 (i64::MAX) に設定し、ENABLE=0, IMASK=1 を強制
-            // タイマー発火検出はハードウェアカウンタとゲストの CVAL を比較して行う
+            // FIQ 防止: ハードウェアタイマーを無効化して vcpu.run() を実行
             self.vcpu
-                .set_sys_reg(applevisor::SysReg::CNTV_CTL_EL0, 0x2)?; // ENABLE=0, IMASK=1
+                .set_sys_reg(applevisor::SysReg::CNTV_CTL_EL0, 0x2)?;
             self.vcpu
                 .set_sys_reg(applevisor::SysReg::CNTV_CVAL_EL0, i64::MAX as u64)?;
-
-            // FIQ をクリア（万が一ペンディングしていても解除）
             self.vcpu.set_pending_interrupt(InterruptType::FIQ, false)?;
 
             self.vcpu.run()?;
 
-            // vcpu.run() 後、ゲストが設定した値を再読み取り
+            // ゲストが設定したタイマー値を再読み取り
             let post_run_ctl = self
                 .vcpu
                 .get_sys_reg(applevisor::SysReg::CNTV_CTL_EL0)
@@ -343,90 +416,54 @@ impl Hypervisor {
                 .get_sys_reg(applevisor::SysReg::CNTV_CVAL_EL0)
                 .unwrap_or(i64::MAX as u64);
 
-            // ゲストが vcpu.run() 中に設定した新しい値を使用
             let timer_enabled = (post_run_ctl & 0x1) != 0;
             let timer_imask = (post_run_ctl & 0x2) != 0;
+            let hw_counter = read_hardware_counter();
 
-            // ハードウェアカウンタを読み取り、タイマー発火条件をチェック
-            // ゲストはこのカウンタを見ているので、これで比較する必要がある
-            let hw_counter: u64;
-            unsafe {
-                std::arch::asm!("mrs {}, cntvct_el0", out(reg) hw_counter);
-            }
-
-            // タイマー発火条件: ENABLE=1, カウンタ >= CVAL, IMASK=0
-            // 注: IRQ 注入のために IMASK=0 も要件に含める
-            //     IMASK=1 の場合、ゲストは割り込みを受け取りたくない
-            let timer_should_fire = timer_enabled && !timer_imask && hw_counter >= post_run_cval;
-
-            if timer_should_fire {
-                static mut SW_TIMER_FIRE_COUNT: u64 = 0;
-                unsafe {
-                    SW_TIMER_FIRE_COUNT += 1;
-                    if SW_TIMER_FIRE_COUNT <= 20 || SW_TIMER_FIRE_COUNT % 1000 == 0 {
-                        eprintln!(
-                            "[SW_TIMER_FIRE #{}] counter=0x{:x} >= cval=0x{:x} -> injecting IRQ via GIC",
-                            SW_TIMER_FIRE_COUNT, hw_counter, post_run_cval
-                        );
-                    }
-                }
-
-                // GIC 経由で IRQ を注入
+            // タイマー発火条件をチェックし GIC 経由で IRQ を注入
+            if timer_enabled && !timer_imask && hw_counter >= post_run_cval {
+                self.debug_stats.log_sw_timer_fire(hw_counter, post_run_cval);
                 let mut gic = self.interrupt_controller.gic.lock().unwrap();
                 gic.set_irq_pending(devices::timer::VIRT_TIMER_IRQ);
             }
 
             let exit_info = self.vcpu.get_exit_info();
 
-            // GIC にペンディング IRQ があれば vCPU に IRQ を注入
-            if self.interrupt_controller.has_pending_irq() {
-                self.vcpu.set_pending_interrupt(InterruptType::IRQ, true)?;
+            // IRQ 状態を更新
+            self.vcpu.set_pending_interrupt(
+                InterruptType::IRQ,
+                self.interrupt_controller.has_pending_irq(),
+            )?;
+
+            // exit reason を記録
+            self.debug_stats.exit_count += 1;
+            match exit_info.reason {
+                applevisor::ExitReason::EXCEPTION => {
+                    let ec = (exit_info.exception.syndrome >> 26) & 0x3f;
+                    match ec {
+                        0x01 => {
+                            self.debug_stats.wfi_count += 1;
+                            let wfi_count = self.debug_stats.wfi_count;
+                            let exit_count = self.debug_stats.exit_count;
+                            if wfi_count <= 5 || wfi_count % 10000 == 0 {
+                                eprintln!("[WFI #{}] at exit #{}", wfi_count, exit_count);
+                            }
+                        }
+                        0x24 => self.debug_stats.mmio_count += 1,
+                        _ => self.debug_stats.other_exception_count += 1,
+                    }
+                }
+                applevisor::ExitReason::VTIMER_ACTIVATED => {
+                    eprintln!("[EXIT #{}] VTIMER_ACTIVATED!", self.debug_stats.exit_count);
+                }
+                _ => {}
             }
 
-            // デバッグ: exit reason を定期的にログ
-            static mut EXIT_COUNT: u64 = 0;
-            static mut WFI_COUNT: u64 = 0;
-            static mut MMIO_COUNT: u64 = 0;
-            static mut VTIMER_COUNT: u64 = 0;
-            static mut OTHER_EXCEPTION_COUNT: u64 = 0;
-            unsafe {
-                EXIT_COUNT += 1;
-                match exit_info.reason {
-                    applevisor::ExitReason::EXCEPTION => {
-                        let ec = (exit_info.exception.syndrome >> 26) & 0x3f;
-                        if ec == 0x01 {
-                            // WFI/WFE
-                            WFI_COUNT += 1;
-                            if WFI_COUNT <= 5 || WFI_COUNT % 10000 == 0 {
-                                eprintln!("[WFI #{}] at exit #{}", WFI_COUNT, EXIT_COUNT);
-                            }
-                        } else if ec == 0x24 {
-                            // Data abort (MMIO)
-                            MMIO_COUNT += 1;
-                        } else {
-                            OTHER_EXCEPTION_COUNT += 1;
-                        }
-                    }
-                    applevisor::ExitReason::VTIMER_ACTIVATED => {
-                        VTIMER_COUNT += 1;
-                        eprintln!("[EXIT #{}] VTIMER_ACTIVATED!", EXIT_COUNT);
-                    }
-                    _ => {}
-                }
-                // 5000 回ごとにサマリーとタイマー状態を出力
-                if EXIT_COUNT % 5000 == 0 {
-                    // ゲストのタイマー状態を表示
-                    let istatus = timer_enabled && hw_counter >= post_run_cval;
-                    eprintln!(
-                        "[TIMER STATE @{}] CTL=0x{:x} (enable={}, imask={}, istatus={}), CVAL=0x{:x}, counter=0x{:x}",
-                        EXIT_COUNT, post_run_ctl, timer_enabled, timer_imask, istatus, post_run_cval, hw_counter
-                    );
-                    let gic_pending = self.interrupt_controller.has_pending_irq();
-                    eprintln!(
-                        "[STATS @{}] WFI={}, MMIO={}, VTIMER_ACTIVATED={}, OTHER_EXC={}, GIC_pending={}",
-                        EXIT_COUNT, WFI_COUNT, MMIO_COUNT, VTIMER_COUNT, OTHER_EXCEPTION_COUNT, gic_pending
-                    );
-                }
+            // 定期的にサマリーを出力
+            if self.debug_stats.exit_count % 5000 == 0 {
+                let gic_pending = self.interrupt_controller.has_pending_irq();
+                self.debug_stats
+                    .log_exit_summary(post_run_ctl, post_run_cval, hw_counter, gic_pending);
             }
 
             // 汎用レジスタを取得
@@ -543,36 +580,18 @@ impl Hypervisor {
                     }
                 }
             } else if let applevisor::ExitReason::VTIMER_ACTIVATED = exit_info.reason {
-                // 仮想タイマーがアクティブになった
-                // vtimer_mask が true なので、FIQ は直接配信されず、ここでハンドリングする
-
-                // デバッグログ
-                static mut VTIMER_ACTIVATED_COUNT: u64 = 0;
-                unsafe {
-                    VTIMER_ACTIVATED_COUNT += 1;
-                    if VTIMER_ACTIVATED_COUNT <= 10 {
-                        eprintln!("[VTIMER_ACTIVATED #{}] Timer fired!", VTIMER_ACTIVATED_COUNT);
-                    }
-                }
-
-                // タイマー IRQ をポーリングして GIC に反映
+                // 仮想タイマーがアクティブになった - GIC 経由で IRQ を注入
+                self.debug_stats.log_vtimer_activated();
                 self.interrupt_controller.poll_timer_irqs();
 
-                // 仮想タイマー IRQ を GIC にセット (IRQ 27 = Virtual Timer)
                 {
                     let mut gic = self.interrupt_controller.gic.lock().unwrap();
                     gic.set_irq_pending(devices::timer::VIRT_TIMER_IRQ);
                 }
 
-                // GIC が有効で割り込みがペンディングしていれば vCPU に IRQ を注入
-                {
-                    let gic = self.interrupt_controller.gic.lock().unwrap();
-                    if gic.has_pending_interrupt() {
-                        self.vcpu.set_pending_interrupt(InterruptType::IRQ, true)?;
-                    }
+                if self.interrupt_controller.has_pending_irq() {
+                    self.vcpu.set_pending_interrupt(InterruptType::IRQ, true)?;
                 }
-
-                // 続行（タイマー割り込みは GIC 経由で IRQ として配信される）
             } else {
                 // 予期しない VM Exit
                 return Ok(HypervisorResult {
@@ -861,41 +880,11 @@ impl Hypervisor {
 
     /// レジスタインデックスから値を取得
     fn get_register_by_index(&self, index: u8) -> Result<u64, Box<dyn std::error::Error>> {
-        let reg = match index {
-            0 => Reg::X0,
-            1 => Reg::X1,
-            2 => Reg::X2,
-            3 => Reg::X3,
-            4 => Reg::X4,
-            5 => Reg::X5,
-            6 => Reg::X6,
-            7 => Reg::X7,
-            8 => Reg::X8,
-            9 => Reg::X9,
-            10 => Reg::X10,
-            11 => Reg::X11,
-            12 => Reg::X12,
-            13 => Reg::X13,
-            14 => Reg::X14,
-            15 => Reg::X15,
-            16 => Reg::X16,
-            17 => Reg::X17,
-            18 => Reg::X18,
-            19 => Reg::X19,
-            20 => Reg::X20,
-            21 => Reg::X21,
-            22 => Reg::X22,
-            23 => Reg::X23,
-            24 => Reg::X24,
-            25 => Reg::X25,
-            26 => Reg::X26,
-            27 => Reg::X27,
-            28 => Reg::X28,
-            29 => Reg::X29,
-            30 => Reg::X30,
-            _ => return Ok(0), // XZR
-        };
-        self.get_reg(reg)
+        if index < 31 {
+            self.get_reg(REGISTER_TABLE[index as usize])
+        } else {
+            Ok(0) // XZR
+        }
     }
 
     /// レジスタインデックスに値を設定
@@ -904,41 +893,11 @@ impl Hypervisor {
         index: u8,
         value: u64,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let reg = match index {
-            0 => Reg::X0,
-            1 => Reg::X1,
-            2 => Reg::X2,
-            3 => Reg::X3,
-            4 => Reg::X4,
-            5 => Reg::X5,
-            6 => Reg::X6,
-            7 => Reg::X7,
-            8 => Reg::X8,
-            9 => Reg::X9,
-            10 => Reg::X10,
-            11 => Reg::X11,
-            12 => Reg::X12,
-            13 => Reg::X13,
-            14 => Reg::X14,
-            15 => Reg::X15,
-            16 => Reg::X16,
-            17 => Reg::X17,
-            18 => Reg::X18,
-            19 => Reg::X19,
-            20 => Reg::X20,
-            21 => Reg::X21,
-            22 => Reg::X22,
-            23 => Reg::X23,
-            24 => Reg::X24,
-            25 => Reg::X25,
-            26 => Reg::X26,
-            27 => Reg::X27,
-            28 => Reg::X28,
-            29 => Reg::X29,
-            30 => Reg::X30,
-            _ => return Ok(()), // XZR - 何もしない
-        };
-        self.set_reg(reg, value)
+        if index < 31 {
+            self.set_reg(REGISTER_TABLE[index as usize], value)
+        } else {
+            Ok(()) // XZR - 何もしない
+        }
     }
 
     /// Timer への参照を取得
