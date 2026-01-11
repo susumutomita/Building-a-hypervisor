@@ -88,12 +88,14 @@ impl GicDistributor {
             irq_enabled: [0; MAX_IRQS / 32],
             irq_pending: [0; MAX_IRQS / 32],
             irq_active: [0; MAX_IRQS / 32],
-            irq_priority: [0xFF; MAX_IRQS], // 最低優先度で初期化
+            irq_priority: [0xA0; MAX_IRQS], // 中程度の優先度で初期化
             irq_targets: [0x01; MAX_IRQS],  // CPU 0 をターゲット
             irq_config: [0; MAX_IRQS / 16],
         };
         // SGI (0-15) はデフォルトで有効
         dist.irq_enabled[0] = 0xFFFF;
+        // PPI (16-31) もデフォルトで有効 (タイマー IRQ を含む)
+        dist.irq_enabled[0] |= 0xFFFF_0000;
         dist
     }
 
@@ -266,6 +268,12 @@ impl Gic {
                 self.cpu_interface.running_priority = 0xFF;
             }
         }
+    }
+
+    /// ペンディング中の割り込みがあるかチェック
+    /// GIC が有効でペンディング中の割り込みがあれば true を返す
+    pub fn has_pending_interrupt(&self) -> bool {
+        self.get_highest_pending_irq().is_some()
     }
 
     /// GICD (Distributor) の読み取り処理
@@ -508,8 +516,10 @@ mod tests {
         let gic = Gic::new();
         assert!(!gic.distributor.enabled);
         assert!(!gic.cpu_interface.enabled);
-        // SGI はデフォルトで有効
-        assert_eq!(gic.distributor.irq_enabled[0], 0xFFFF);
+        // SGI (0-15) と PPI (16-31) はデフォルトで有効
+        assert_eq!(gic.distributor.irq_enabled[0], 0xFFFF_FFFF);
+        // デフォルト優先度は 0xA0
+        assert_eq!(gic.distributor.irq_priority[0], 0xA0);
     }
 
     #[test]
