@@ -69,7 +69,7 @@ impl DebugStats {
 
     fn log_timer_sync(&mut self, guest_ctl: u64, guest_cval: u64, virt_counter: u64) {
         self.timer_sync_count += 1;
-        if self.timer_sync_count <= 20 || self.timer_sync_count % 5000 == 0 {
+        if self.timer_sync_count <= 20 || self.timer_sync_count.is_multiple_of(5000) {
             let enabled = (guest_ctl & 0x1) != 0;
             let imask = (guest_ctl & 0x2) != 0;
             eprintln!(
@@ -81,7 +81,7 @@ impl DebugStats {
 
     fn log_sw_timer_fire(&mut self, hw_counter: u64, cval: u64) {
         self.sw_timer_fire_count += 1;
-        if self.sw_timer_fire_count <= 20 || self.sw_timer_fire_count % 1000 == 0 {
+        if self.sw_timer_fire_count <= 20 || self.sw_timer_fire_count.is_multiple_of(1000) {
             eprintln!(
                 "[SW_TIMER_FIRE #{}] counter=0x{:x} >= cval=0x{:x} -> injecting IRQ via GIC",
                 self.sw_timer_fire_count, hw_counter, cval
@@ -458,7 +458,7 @@ impl Hypervisor {
                             self.debug_stats.wfi_count += 1;
                             let wfi_count = self.debug_stats.wfi_count;
                             let exit_count = self.debug_stats.exit_count;
-                            if wfi_count <= 5 || wfi_count % 10000 == 0 {
+                            if wfi_count <= 5 || wfi_count.is_multiple_of(10000) {
                                 eprintln!("[WFI #{}] at exit #{}", wfi_count, exit_count);
                             }
                         }
@@ -473,7 +473,7 @@ impl Hypervisor {
             }
 
             // 定期的にサマリーを出力
-            if self.debug_stats.exit_count % 5000 == 0 {
+            if self.debug_stats.exit_count.is_multiple_of(5000) {
                 let gic_pending = self.interrupt_controller.has_pending_irq();
                 self.debug_stats.log_exit_summary(
                     post_run_ctl,
