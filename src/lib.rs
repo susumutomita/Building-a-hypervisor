@@ -99,7 +99,13 @@ impl DebugStats {
         }
     }
 
-    fn log_exit_summary(&self, post_run_ctl: u64, post_run_cval: u64, hw_counter: u64, gic_pending: bool) {
+    fn log_exit_summary(
+        &self,
+        post_run_ctl: u64,
+        post_run_cval: u64,
+        hw_counter: u64,
+        gic_pending: bool,
+    ) {
         let timer_enabled = (post_run_ctl & 0x1) != 0;
         let timer_imask = (post_run_ctl & 0x2) != 0;
         let istatus = timer_enabled && hw_counter >= post_run_cval;
@@ -109,8 +115,12 @@ impl DebugStats {
         );
         eprintln!(
             "[STATS @{}] WFI={}, MMIO={}, VTIMER_ACTIVATED={}, OTHER_EXC={}, GIC_pending={}",
-            self.exit_count, self.wfi_count, self.mmio_count, self.vtimer_activated_count,
-            self.other_exception_count, gic_pending
+            self.exit_count,
+            self.wfi_count,
+            self.mmio_count,
+            self.vtimer_activated_count,
+            self.other_exception_count,
+            gic_pending
         );
     }
 }
@@ -187,8 +197,10 @@ impl Hypervisor {
         // IMASK=1 を設定して FIQ を防止
         vcpu.set_sys_reg(applevisor::SysReg::CNTV_CVAL_EL0, i64::MAX as u64)?;
         vcpu.set_sys_reg(applevisor::SysReg::CNTV_CTL_EL0, 0x2)?; // ENABLE=0, IMASK=1
-        eprintln!("[DEBUG] vtimer initialized: CVAL=i64::MAX (0x{:x}), CTL=0x2 (IMASK=1)", i64::MAX as u64);
-
+        eprintln!(
+            "[DEBUG] vtimer initialized: CVAL=i64::MAX (0x{:x}), CTL=0x2 (IMASK=1)",
+            i64::MAX as u64
+        );
 
         // vtimer_offset を確認
         let verified_offset = vcpu.get_vtimer_offset().unwrap_or(0);
@@ -422,7 +434,8 @@ impl Hypervisor {
 
             // タイマー発火条件をチェックし GIC 経由で IRQ を注入
             if timer_enabled && !timer_imask && hw_counter >= post_run_cval {
-                self.debug_stats.log_sw_timer_fire(hw_counter, post_run_cval);
+                self.debug_stats
+                    .log_sw_timer_fire(hw_counter, post_run_cval);
                 let mut gic = self.interrupt_controller.gic.lock().unwrap();
                 gic.set_irq_pending(devices::timer::VIRT_TIMER_IRQ);
             }
@@ -462,8 +475,12 @@ impl Hypervisor {
             // 定期的にサマリーを出力
             if self.debug_stats.exit_count % 5000 == 0 {
                 let gic_pending = self.interrupt_controller.has_pending_irq();
-                self.debug_stats
-                    .log_exit_summary(post_run_ctl, post_run_cval, hw_counter, gic_pending);
+                self.debug_stats.log_exit_summary(
+                    post_run_ctl,
+                    post_run_cval,
+                    hw_counter,
+                    gic_pending,
+                );
             }
 
             // 汎用レジスタを取得
